@@ -1,5 +1,6 @@
 """
 MCTS solver with Importance Sampling
+
 Fields:
     depth::Int64
         Maximum rollout horizon and tree depth.
@@ -82,6 +83,11 @@ Fields:
     show_progress::Bool
         Show progress bar during simulation.
         default: false
+
+TODOs:
+- Remove the MCTS dependency.
+- Clean up some of the settings.
+- Change the name: PISDPW --> PTree
 """
 mutable struct PISDPWSolver <: AbstractMCTSSolver
     depth::Int
