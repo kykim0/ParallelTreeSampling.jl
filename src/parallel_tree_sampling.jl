@@ -1,15 +1,14 @@
-POMDPs.solve(solver::PISDPWSolver, mdp::Union{POMDP,MDP}) = PISDPWPlanner(solver, mdp)
+POMDPs.solve(solver::PISSolver, mdp::Union{POMDP,MDP}) = PISPlanner(solver, mdp)
 
 """
 Delete existing decision tree.
 """
-function clear_tree!(p::PISDPWPlanner)
+function clear_tree!(p::PISPlanner)
     p.tree = nothing
 end
 
 """
-Utility function for numerically stable softmax 
-Adapted from: https://nextjournal.com/jbowles/the-mathematical-ideal-and-softmax-in-julia
+Utility function for numerically stable softmax.
 """
 _exp(x) = exp.(x .- maximum(x))
 _exp(x, θ::AbstractFloat) = exp.((x .- maximum(x)) * θ)
@@ -27,7 +26,7 @@ softmax(X) = softmax(X, 1)
 
 
 """
-Calculate next action
+Calculate next action.
 """
 function select_action(nodes, values; c=5.0)
     prob = softmax(c*values)
@@ -38,7 +37,7 @@ function select_action(nodes, values; c=5.0)
 end
 
 """
-Calculate IS weights
+Calculate IS weights.
 """
 function compute_IS_weight(q_logprob, a, distribution)
     if distribution == nothing
@@ -50,16 +49,16 @@ function compute_IS_weight(q_logprob, a, distribution)
 end
 
 """
-Construct an PISDPW tree and choose an action.
+Construct a PISTree and choose an action.
 """
-POMDPs.action(p::PISDPWPlanner, s) = first(action_info(p, s))
+POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 
 estimate_value(f::Function, mdp::Union{POMDP,MDP}, state, w::Float64, depth::Int) = f(mdp, state, w, depth)
 
 """
-Construct a PISDPW tree and choose the best action. Also output some information.
+Construct a PISTree and choose the best action. Also output some information.
 """
-function POMDPModelTools.action_info(p::PISDPWPlanner, s; tree_in_info=false, w=0.0, use_prior=true)
+function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0, use_prior=true)
     local a::actiontype(p.mdp)
     info = Dict{Symbol, Any}()
     try
@@ -72,7 +71,7 @@ function POMDPModelTools.action_info(p::PISDPWPlanner, s; tree_in_info=false, w=
 
         tree = p.tree
         if !p.solver.keep_tree || tree == nothing
-            tree = PISDPWTree{statetype(p.mdp),actiontype(p.mdp)}()
+            tree = PISTree{statetype(p.mdp),actiontype(p.mdp)}()
             p.tree = tree
         end
         snode = insert_state_node!(tree, s)
@@ -125,9 +124,9 @@ end
 
 
 """
-Return the reward for one iteration of MCTSDPW.
+Return the reward for one iteration of MCTS.
 """
-function simulate(dpw::PISDPWPlanner, snode::PISDPWStateNode, w::Float64, d::Int, timeout_s::Float64=0.0; use_prior=true)
+function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int, timeout_s::Float64=0.0; use_prior=true)
     sol = dpw.solver
     timer = sol.timer
     tree = dpw.tree
@@ -190,7 +189,7 @@ function simulate(dpw::PISDPWPlanner, snode::PISDPWStateNode, w::Float64, d::Int
         q = r + discount(dpw.mdp) * simulate(dpw, spnode, w, d - 1)
     end
 
-    function backpropagate(snode::PISDPWStateNode, sanode::PISDPWActionNode, q::Float64)
+    function backpropagate(snode::PISStateNode, sanode::PISActionNode, q::Float64)
         snode.total_n += 1
         sanode.n += 1
         sanode.q += (q - sanode.q) / sanode.n
@@ -202,7 +201,7 @@ function simulate(dpw::PISDPWPlanner, snode::PISDPWStateNode, w::Float64, d::Int
 end
 
 
-function sample_sanode(tree::PISDPWTree, snode::PISDPWStateNode)
+function sample_sanode(tree::PISTree, snode::PISStateNode)
     all_Q = []
     all_sanodes = []
     for a_label in children(snode)
@@ -216,7 +215,7 @@ function sample_sanode(tree::PISDPWTree, snode::PISDPWStateNode)
 end
 
 
-function sample_sanode_UCB(tree::PISDPWTree, snode::PISDPWStateNode, c::Float64, virtual_loss::Float64=0.0)
+function sample_sanode_UCB(tree::PISTree, snode::PISStateNode, c::Float64, virtual_loss::Float64=0.0)
     all_UCB = []
     all_sanodes = []
     ltn = log(total_n(snode))

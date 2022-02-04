@@ -9,7 +9,7 @@ using ProgressMeter
 using Random
 using StatsBase
 
-export PISDPWSolver, PISDPWPlanner
+export PISSolver, PISPlanner
 include("parallel_tree_sampling_types.jl")
 include("parallel_tree_sampling.jl")
 

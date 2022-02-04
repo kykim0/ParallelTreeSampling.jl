@@ -87,9 +87,9 @@ Fields:
 TODOs:
 - Remove the MCTS dependency.
 - Clean up some of the settings.
-- Change the name: PISDPW --> PTree
+- Change the name: PISDPW --> PIS
 """
-mutable struct PISDPWSolver <: AbstractMCTSSolver
+mutable struct PISSolver <: AbstractMCTSSolver
     depth::Int
     exploration_constant::Float64
     n_iterations::Int
@@ -126,40 +126,39 @@ function MCTS.next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s,
 end
 
 """
-TreeSamplingDPWSolver()
-Use keyword arguments to specify values for the fields
+Use keyword arguments to specify values for the fields.
 """
-function PISDPWSolver(;depth::Int=10,
-                    exploration_constant::Float64=1.0,
-                    n_iterations::Int=100,
-                    max_time::Float64=Inf,
-                    k_action::Float64=10.0,
-                    alpha_action::Float64=0.5,
-                    k_state::Float64=10.0,
-                    alpha_state::Float64=0.5,
-                    virtual_loss::Float64=0.0,
-                    keep_tree::Bool=false,
-                    enable_action_pw::Bool=true,
-                    enable_state_pw::Bool=true,
-                    check_repeat_state::Bool=true,  # TODO(kykim): Are the two needed?
-                    check_repeat_action::Bool=true,
-                    tree_in_info::Bool=false,
-                    rng::AbstractRNG=Random.GLOBAL_RNG,
-                    estimate_value::Any=RolloutEstimator(RandomSolver(rng)),
-                    init_Q::Any=0.0,
-                    init_N::Any=1,
-                    next_action::Any=UniformActionGenerator(rng),
-                    default_action::Any=ExceptionRethrow(),
-                    reset_callback::Function=(mdp, s) -> false,
-                    show_progress::Bool=false,
-                    timer=() -> 1e-9*time_ns())
-        PISDPWSolver(depth, exploration_constant, n_iterations, max_time, k_action, alpha_action, k_state, alpha_state, virtual_loss,
-                    keep_tree, enable_action_pw, enable_state_pw, check_repeat_state, check_repeat_action, tree_in_info, rng,
-                    estimate_value, init_Q, init_N, next_action, default_action, reset_callback, show_progress, timer)
+function PISSolver(;depth::Int=10,
+                   exploration_constant::Float64=1.0,
+                   n_iterations::Int=100,
+                   max_time::Float64=Inf,
+                   k_action::Float64=10.0,
+                   alpha_action::Float64=0.5,
+                   k_state::Float64=10.0,
+                   alpha_state::Float64=0.5,
+                   virtual_loss::Float64=0.0,
+                   keep_tree::Bool=false,
+                   enable_action_pw::Bool=true,
+                   enable_state_pw::Bool=true,
+                   check_repeat_state::Bool=true,  # TODO(kykim): Are the two needed?
+                   check_repeat_action::Bool=true,
+                   tree_in_info::Bool=false,
+                   rng::AbstractRNG=Random.GLOBAL_RNG,
+                   estimate_value::Any=RolloutEstimator(RandomSolver(rng)),
+                   init_Q::Any=0.0,
+                   init_N::Any=1,
+                   next_action::Any=UniformActionGenerator(rng),
+                   default_action::Any=ExceptionRethrow(),
+                   reset_callback::Function=(mdp, s) -> false,
+                   show_progress::Bool=false,
+                   timer=() -> 1e-9*time_ns())
+    PISSolver(depth, exploration_constant, n_iterations, max_time, k_action, alpha_action, k_state, alpha_state, virtual_loss,
+              keep_tree, enable_action_pw, enable_state_pw, check_repeat_state, check_repeat_action, tree_in_info, rng,
+              estimate_value, init_Q, init_N, next_action, default_action, reset_callback, show_progress, timer)
 end
 
 
-mutable struct PISDPWActionNode{S,A}
+mutable struct PISActionNode{S,A}
     id::Int
     a_label::A
     n::Int
@@ -169,15 +168,15 @@ mutable struct PISDPWActionNode{S,A}
     n_a_children::Int
     a_lock::ReentrantLock
 end
-PISDPWActionNode(id::Int, a::A, n::Int, q::Float64, transitions::Vector{Tuple{S,Float64}}) where {S,A} =
-    PISDPWActionNode{S,A}(id, a, n, q, transitions, Set{S}(), 0, ReentrantLock())
+PISActionNode(id::Int, a::A, n::Int, q::Float64, transitions::Vector{Tuple{S,Float64}}) where {S,A} =
+    PISActionNode{S,A}(id, a, n, q, transitions, Set{S}(), 0, ReentrantLock())
 
-@inline n(n::PISDPWActionNode) = n.n
-@inline q(n::PISDPWActionNode) = n.q
-@inline n_a_children(n::PISDPWActionNode) = n.n_a_children
+@inline n(n::PISActionNode) = n.n
+@inline q(n::PISActionNode) = n.q
+@inline n_a_children(n::PISActionNode) = n.n_a_children
 
 
-mutable struct PISDPWStateNode{S,A} <: AbstractStateNode
+mutable struct PISStateNode{S,A} <: AbstractStateNode
     id::Int
     s_label::S
     total_n::Int
@@ -186,60 +185,58 @@ mutable struct PISDPWStateNode{S,A} <: AbstractStateNode
     # Action nodes currently being evaluated. Used for applying virtual loss.
     a_selected::Set{A}
 end
-PISDPWStateNode(id::Int, s::S, total_n::Int, children::Vector{A}) where {S,A} =
-    PISDPWStateNode{S,A}(id, s, total_n, children, ReentrantLock(), Set{A}())
+PISStateNode(id::Int, s::S, total_n::Int, children::Vector{A}) where {S,A} =
+    PISStateNode{S,A}(id, s, total_n, children, ReentrantLock(), Set{A}())
 
-@inline total_n(n::PISDPWStateNode) = n.total_n
-@inline children(n::PISDPWStateNode) = n.children
-@inline n_children(n::PISDPWStateNode) = length(children(n))
-@inline isroot(n::PISDPWStateNode) = (n.id == 1)
+@inline total_n(n::PISStateNode) = n.total_n
+@inline children(n::PISStateNode) = n.children
+@inline n_children(n::PISStateNode) = length(children(n))
+@inline isroot(n::PISStateNode) = (n.id == 1)
 
 
-mutable struct PISDPWTree{S,A}
+mutable struct PISTree{S,A}
     root::Union{Nothing, S}
 
-    state_nodes::Dict{S, PISDPWStateNode}
-    state_action_nodes::Dict{Tuple{S,A}, PISDPWActionNode}
-
-    _s_id_counter::Threads.Atomic{Int}
-    _a_id_counter::Threads.Atomic{Int}
+    state_nodes::Dict{S, PISStateNode}
+    state_action_nodes::Dict{Tuple{S,A}, PISActionNode}
 
     state_nodes_lock::ReentrantLock
     state_action_nodes_lock::ReentrantLock
 
-    # for tracking transitions
-    # unique_transitions::Set{Tuple{Int,Int}}
+    # Used to assign unique ids to nodes.
+    _s_id_counter::Threads.Atomic{Int}
+    _a_id_counter::Threads.Atomic{Int}
 
-    function PISDPWTree{S,A}(root::Union{Nothing, S}=nothing) where {S,A} 
+    function PISTree{S,A}(root::Union{Nothing, S}=nothing) where {S,A} 
         return new(root,
-                   Dict{S, PISDPWStateNode}(),
-                   Dict{Tuple{S,A}, PISDPWActionNode}(),
-
-                   Threads.Atomic{Int}(1),
-                   Threads.Atomic{Int}(1),
+                   Dict{S, PISStateNode}(),
+                   Dict{Tuple{S,A}, PISActionNode}(),
 
                    ReentrantLock(),
-                   ReentrantLock())
+                   ReentrantLock(),
+
+                   Threads.Atomic{Int}(1),
+                   Threads.Atomic{Int}(1))
     end
 end
 
-Base.isempty(tree::PISDPWTree) = isempty(tree.state_nodes)
+Base.isempty(tree::PISTree) = isempty(tree.state_nodes)
 
 
-function insert_state_node!(tree::PISDPWTree{S,A}, s::S) where {S,A}
+function insert_state_node!(tree::PISTree{S,A}, s::S) where {S,A}
     haskey(tree.state_nodes, s) && return tree.state_nodes[s]
     id = Threads.atomic_add!(tree._s_id_counter, 1)
-    snode = PISDPWStateNode(id, s, 0, Vector{A}())
+    snode = PISStateNode(id, s, 0, Vector{A}())
     tree.state_nodes[s] = snode
     return snode
 end
 
 
-function insert_action_node!(tree::PISDPWTree{S,A}, snode::PISDPWStateNode{S,A}, a::A, n0::Int, q0::Float64) where {S,A}
+function insert_action_node!(tree::PISTree{S,A}, snode::PISStateNode{S,A}, a::A, n0::Int, q0::Float64) where {S,A}
     state_action_key = (snode.s_label, a)
     haskey(tree.state_action_nodes, state_action_key) && return tree.state_action_nodes[state_action_key]
     id = Threads.atomic_add!(tree._a_id_counter, 1)
-    sanode = PISDPWActionNode(id, a, n0, q0, Vector{Tuple{S,Float64}}())
+    sanode = PISActionNode(id, a, n0, q0, Vector{Tuple{S,Float64}}())
     tree.state_action_nodes[state_action_key] = sanode
     push!(snode.children, a)
     snode.total_n += n0
@@ -247,10 +244,10 @@ function insert_action_node!(tree::PISDPWTree{S,A}, snode::PISDPWStateNode{S,A},
 end
 
 
-mutable struct PISDPWPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG} <: AbstractMCTSPlanner{P}
-    solver::PISDPWSolver
+mutable struct PISPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG} <: AbstractMCTSPlanner{P}
+    solver::PISSolver
     mdp::P
-    tree::Union{Nothing, PISDPWTree{S,A}}
+    tree::Union{Nothing, PISTree{S,A}}
     solved_estimate::SE
     next_action::NA
     reset_callback::RCB
@@ -258,22 +255,22 @@ mutable struct PISDPWPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG} <: Abs
 end
 
 
-function PISDPWPlanner(solver::PISDPWSolver, mdp::P) where P<:Union{POMDP,MDP}
+function PISPlanner(solver::PISSolver, mdp::P) where P<:Union{POMDP,MDP}
     se = MCTS.convert_estimator(solver.estimate_value, solver, mdp)
-    return PISDPWPlanner{P,
-                         statetype(P),
-                         actiontype(P),
-                         typeof(se),
-                         typeof(solver.next_action),
-                         typeof(solver.reset_callback),
-                         typeof(solver.rng)}(
-                             solver,
-                             mdp,
-                             nothing,
-                             se,
-                             solver.next_action,
-                             solver.reset_callback,
-                             solver.rng)
+    return PISPlanner{P,
+                      statetype(P),
+                      actiontype(P),
+                      typeof(se),
+                      typeof(solver.next_action),
+                      typeof(solver.reset_callback),
+                      typeof(solver.rng)}(
+                          solver,
+                          mdp,
+                          nothing,
+                          se,
+                          solver.next_action,
+                          solver.reset_callback,
+                          solver.rng)
 end
 
-Random.seed!(p::PISDPWPlanner, seed) = Random.seed!(p.rng, seed)
+Random.seed!(p::PISPlanner, seed) = Random.seed!(p.rng, seed)
