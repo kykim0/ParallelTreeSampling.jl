@@ -149,10 +149,6 @@ function simulate(dpw::PISDPWPlanner, snode::PISDPWStateNode, w::Float64, d::Int
                                     init_Q(sol.init_Q, dpw.mdp, s, a))
             end
         end
-            a = next_action(dpw.next_action, dpw.mdp, s, snode) # action generation step
-            insert_action_node!(tree, snode, a,
-                                init_N(sol.init_N, dpw.mdp, s, a),
-                                init_Q(sol.init_Q, dpw.mdp, s, a))
     elseif n_children(snode) == 0
         Base.@lock tree.state_action_nodes_lock begin
             for a in actions(dpw.mdp, s)
