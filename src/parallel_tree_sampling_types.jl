@@ -87,9 +87,8 @@ Fields:
 TODOs:
 - Remove the MCTS dependency.
 - Clean up some of the settings.
-- Change the name: PISDPW --> PIS
 """
-mutable struct PISSolver <: AbstractMCTSSolver
+mutable struct PISSolver
     depth::Int
     exploration_constant::Float64
     n_iterations::Int
@@ -244,7 +243,7 @@ function insert_action_node!(tree::PISTree{S,A}, snode::PISStateNode{S,A}, a::A,
 end
 
 
-mutable struct PISPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG} <: AbstractMCTSPlanner{P}
+mutable struct PISPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG}
     solver::PISSolver
     mdp::P
     tree::Union{Nothing, PISTree{S,A}}

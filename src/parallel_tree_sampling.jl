@@ -63,10 +63,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0
     info = Dict{Symbol, Any}()
     try
         if isterminal(p.mdp, s)
-            error("""
-                  MCTS cannot handle terminal states. action was called with
-                  s = $s
-                  """)
+            error("MCTS cannot handle terminal states: s = $s")
         end
 
         tree = p.tree
@@ -103,7 +100,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0
             end
         end
 
-        p.reset_callback(p.mdp, s) # Optional: leave the MDP in the current state.
+        p.reset_callback(p.mdp, s)  # Optional: Leave the MDP in the current state.
         info[:search_time_us] = (timer() - start_s) * 1e6
         info[:tree_queries] = nquery
         if p.solver.tree_in_info || tree_in_info
@@ -131,7 +128,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int, time
     timer = sol.timer
     tree = dpw.tree
     s = snode.s_label
-    dpw.reset_callback(dpw.mdp, s) # Optional: used to reset/reinitialize MDP to a given state.
+    dpw.reset_callback(dpw.mdp, s)  # Optional: Used to reset/reinitialize MDP to a given state.
     if isterminal(dpw.mdp, s)
         return 0.0
     elseif d == 0 || (timeout_s > 0.0 && timer() > timeout_s)
@@ -141,7 +138,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int, time
     # Action progressive widening.
     if sol.enable_action_pw
         if n_children(snode) <= sol.k_action * total_n(snode)^sol.alpha_action
-            a = next_action(dpw.next_action, dpw.mdp, s, snode) # action generation step
+            a = next_action(dpw.next_action, dpw.mdp, s, snode)
             Base.@lock tree.state_action_nodes_lock begin
                 insert_action_node!(tree, snode, a,
                                     init_N(sol.init_N, dpw.mdp, s, a),
