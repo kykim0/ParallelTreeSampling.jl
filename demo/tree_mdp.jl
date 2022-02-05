@@ -73,14 +73,14 @@ end
 
 function rollout(mdp::TreeMDP, s::TreeState, w::Float64, d::Int64)
     if d == 0 || isterminal(mdp, s)
-        return 0.0, w
+        return 0.0
     else
         p_action = POMDPs.actions(mdp, s)
         a = rand(p_action)
-
+        
         (sp, r) = @gen(:sp, :r)(mdp, s, [a, w], Random.GLOBAL_RNG)
-        q_value = r + discount(mdp)*first(rollout(mdp, sp, w, d-1))
+        q_value = r + discount(mdp) * rollout(mdp, sp, w, d-1)
 
-        return q_value, w
+        return q_value
     end
 end
