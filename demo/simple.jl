@@ -27,6 +27,7 @@ fixed_s = rand(initialstate(mdp))
 
 N = 1000
 c = 0.3
+vloss = 0.0
 α = 0.1
 β = 1.0
 γ = 0.0
@@ -36,7 +37,7 @@ path = "/home/kykim/dev/sisl/ParallelTreeSampling/data"
 tree_mdp = create_tree_amdp(mdp, actions; reduction="sum")
 
 baseline_out = run_baseline(mdp, fixed_s, actions; N)
-mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=1000, c=0.3, vloss=3.0, α=α, β=β, γ=γ)
+mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=1000, c=0.3, vloss=vloss, α=α, β=β, γ=γ)
 
 save(joinpath(path, "simple_baseline_$(N).jld2"),
      Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
