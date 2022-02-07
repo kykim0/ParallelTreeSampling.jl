@@ -1,6 +1,10 @@
-using POMDPs
 using Distributions
 using ImportanceWeightedRiskMetrics
+using ParallelTreeSampling
+using POMDPModelTools
+using POMDPPolicies
+using POMDPs
+using POMDPSimulators
 using Random
 
 include("tree_mdp.jl")

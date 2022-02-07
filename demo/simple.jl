@@ -1,4 +1,5 @@
 using Distributions
+using FileIO
 using POMDPGym
 using POMDPs
 using Random
