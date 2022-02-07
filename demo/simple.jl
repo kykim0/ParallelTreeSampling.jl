@@ -11,12 +11,11 @@ include("utils.jl")
 struct SimpleMDP <: MDP{Float64, Float64} end
 
 POMDPs.initialstate(mdp::SimpleMDP) = MersenneTwister()
-
 POMDPs.actions(mdp::SimpleMDP) = DiscreteNonParametric([1.0, 2.0], [0.5, 0.5])
 POMDPs.isterminal(mdp::SimpleMDP, s) = s > 5
 POMDPs.discount(mdp::SimpleMDP) = 1.0
 
-function POMDPs.gen(mdp::SimpleMDP, s, a, rng::AbstractRNG = Random.GLOBAL_RNG; kwargs...)
+function POMDPs.gen(mdp::SimpleMDP, s, a, rng::AbstractRNG=Random.GLOBAL_RNG; kwargs...)
     sp = s + a
     r = sp > 2 ? 1 : 2
     return (sp=sp, r=r)

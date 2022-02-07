@@ -1,5 +1,3 @@
-# Based on TreeImportanceSampling.jl.
-
 struct TreeState
     values::Vector{Any}  # Multi-level state.
     costs::Vector{Any}
@@ -29,10 +27,10 @@ function POMDPs.reward(mdp::TreeMDP, state::TreeState, action)
     if !state.done
         r = 0
     else
-        if mdp.reduction=="sum"
+        if mdp.reduction == "sum"
             r = sum(state.costs)
-        elseif mdp.reduction=="max"
-            r = max(state.costs...)
+        elseif mdp.reduction == "max"
+            r = maximum(state.costs)
         else
             throw("Not implemented reduction $(mdp.reduction)!")
         end
@@ -43,17 +41,17 @@ function POMDPs.reward(mdp::TreeMDP, state::TreeState, action)
 end
 
 
-function POMDPs.initialstate(mdp::TreeMDP)  # rng unused.
+function POMDPs.initialstate(mdp::TreeMDP)
     return TreeState(rand(initialstate(mdp.rmdp)))
 end
 
 
-function POMDPs.gen(m::TreeMDP, s::TreeState, a, rng)
-    # transition model
-    m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, first(a), rng)
-    sp = TreeState([s.values..., first(a)], [s.costs..., cost], m_sp, isterminal(m.rmdp, m_sp), last(a))
+function POMDPs.gen(m::TreeMDP, s::TreeState, action, rng)
+    a, w = action
+    m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, a, rng)
+    sp = TreeState([s.values..., a], [s.costs..., cost], m_sp, isterminal(m.rmdp, m_sp), a)
 
-    r = POMDPs.reward(m, sp, a)
+    r = POMDPs.reward(m, sp, action)
     return (sp=sp, r=r)
 end
 
