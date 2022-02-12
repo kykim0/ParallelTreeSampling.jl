@@ -113,6 +113,7 @@ mutable struct PISSolver
     reset_callback::Function
     show_progress::Bool
     timer::Function
+    α::Float64
 end
 
 mutable struct UniformActionGenerator{RNG<:AbstractRNG}
@@ -121,7 +122,8 @@ end
 UniformActionGenerator() = UniformActionGenerator(Random.GLOBAL_RNG)
 
 function MCTS.next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s, snode::AbstractStateNode)
-    rand(gen.rng, support(actions(mdp, s)))
+    # rand(gen.rng, support(actions(mdp, s)))
+    rand(gen.rng, actions(mdp, s))
 end
 
 """
@@ -150,10 +152,11 @@ function PISSolver(;depth::Int=10,
                    default_action::Any=ExceptionRethrow(),
                    reset_callback::Function=(mdp, s) -> false,
                    show_progress::Bool=false,
-                   timer=() -> 1e-9*time_ns())
+                   timer=() -> 1e-9*time_ns(),
+                   α::Float64=0.1)
     PISSolver(depth, exploration_constant, n_iterations, max_time, k_action, alpha_action, k_state, alpha_state, virtual_loss,
               keep_tree, enable_action_pw, enable_state_pw, check_repeat_state, check_repeat_action, tree_in_info, rng,
-              estimate_value, init_Q, init_N, next_action, default_action, reset_callback, show_progress, timer)
+              estimate_value, init_Q, init_N, next_action, default_action, reset_callback, show_progress, timer, α)
 end
 
 
@@ -165,10 +168,11 @@ mutable struct PISActionNode{S,A}
     transitions::Vector{Tuple{S,Float64}}
     unique_transitions::Set{S}
     n_a_children::Int
+    conditional_cdf_est::RunningCDFEstimator
     a_lock::ReentrantLock
 end
 PISActionNode(id::Int, a::A, n::Int, q::Float64, transitions::Vector{Tuple{S,Float64}}) where {S,A} =
-    PISActionNode{S,A}(id, a, n, q, transitions, Set{S}(), 0, ReentrantLock())
+    PISActionNode{S,A}(id, a, n, q, transitions, Set{S}(), 0, RunningCDFEstimator([0.0], [1e-5]), ReentrantLock())
 
 @inline n(n::PISActionNode) = n.n
 @inline q(n::PISActionNode) = n.q
@@ -199,6 +203,8 @@ mutable struct PISTree{S,A}
     state_nodes::Dict{S, PISStateNode}
     state_action_nodes::Dict{Tuple{S,A}, PISActionNode}
 
+    cdf_est::RunningCDFEstimator
+
     state_nodes_lock::ReentrantLock
     state_action_nodes_lock::ReentrantLock
 
@@ -210,6 +216,8 @@ mutable struct PISTree{S,A}
         return new(root,
                    Dict{S, PISStateNode}(),
                    Dict{Tuple{S,A}, PISActionNode}(),
+
+                   RunningCDFEstimator([0.0], [1e-7]),
 
                    ReentrantLock(),
                    ReentrantLock(),

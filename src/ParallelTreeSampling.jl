@@ -1,6 +1,7 @@
 module ParallelTreeSampling
 
 using Distributions
+using ImportanceWeightedRiskMetrics
 using MCTS
 using POMDPModelTools
 using POMDPPolicies

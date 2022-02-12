@@ -1,7 +1,7 @@
 POMDPs.solve(solver::PISSolver, mdp::Union{POMDP,MDP}) = PISPlanner(solver, mdp)
 
 """
-Delete existing decision tree.
+Deletes existing decision tree.
 """
 function clear_tree!(p::PISPlanner)
     p.tree = nothing
@@ -26,18 +26,33 @@ softmax(X) = softmax(X, 1)
 
 
 """
-Calculate next action.
+Calculates next action.
 """
-function select_action(nodes, values; c=5.0)
-    prob = softmax(c*values)
+function select_action(nodes, values, prob_α, cost_α, prob_p, n, α, β, γ)
+    prob = adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
     sanode_idx = sample(1:length(nodes), Weights(prob))
     sanode = nodes[sanode_idx]
     q_logprob = log(prob[sanode_idx])
     return sanode, q_logprob
 end
 
+
+function adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
+    cvar_strategy = [(cost_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(cost_α...)) / 20 .+ 1e-5
+    cdf_strategy = [(prob_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(prob_α...)) * max(prob_p...) / 20 .+ 1e-5
+
+    # Normalize to unity
+    cvar_strategy /= sum(cvar_strategy)
+    cdf_strategy /= sum(cdf_strategy)
+
+    # Mixture weighting
+    prob = β * prob_p .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
+    return prob
+end
+
+
 """
-Calculate IS weights.
+Calculates IS weights.
 """
 function compute_IS_weight(q_logprob, a, distribution)
     if distribution == nothing
@@ -49,16 +64,16 @@ function compute_IS_weight(q_logprob, a, distribution)
 end
 
 """
-Construct a PISTree and choose an action.
+Constructs a PISTree and choose an action.
 """
 POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 
-estimate_value(f::Function, mdp::Union{POMDP,MDP}, state, w::Float64, depth::Int) = f(mdp, state, w, depth)
+MCTS.estimate_value(f::Function, mdp::Union{POMDP,MDP}, state, w::Float64, depth::Int) = f(mdp, state, w, depth)
 
 """
-Construct a PISTree and choose the best action. Also output some information.
+Constructs a PISTree and choose the best action.
 """
-function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0, use_prior=true)
+function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0, β=0.0, γ=1.0, schedule=0.1)
     local a::actiontype(p.mdp)
     info = Dict{Symbol, Any}()
     try
@@ -80,7 +95,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0
         p.solver.show_progress ? progress = Progress(n_iterations) : nothing
         sim_channel = Channel{Task}(min(1000, n_iterations)) do channel
             for n in 1:n_iterations
-                put!(channel, Threads.@spawn simulate(p, snode, w, p.solver.depth, timeout_s; use_prior))
+                put!(channel, Threads.@spawn simulate(p, snode, w, p.solver.depth, β, γ, schedule, timeout_s))
             end
         end
 
@@ -88,6 +103,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0
         for sim_task in sim_channel
             if timer() > timeout_s
                 p.solver.show_progress ? finish!(progress) : nothing
+                @show Timeout reached
                 break
             end
 
@@ -107,32 +123,37 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0
             info[:tree] = tree
         end
 
-        sanode, q_logprob = sample_sanode(tree, snode)
+        sanode = best_sanode(tree, snode)
         a = sanode.a_label
-        w_node = compute_IS_weight(q_logprob, a, use_prior ? actions(p.mdp, s) : nothing)
-        w = w + w_node
     catch ex
         a = convert(actiontype(p.mdp), default_action(p.solver.default_action, p.mdp, s, ex))
         info[:exception] = ex
     end
 
-    return a, w, info
+    return a, info
 end
 
 
 """
-Return the reward for one iteration of MCTS.
+Returns the reward for one iteration of MCTS.
 """
-function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int, timeout_s::Float64=0.0; use_prior=true)
+function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int,
+                  β::Float64=0.0, γ::Float64=1.0, schedule::Float64=0.1,
+                  timeout_s::Float64=0.0)
     sol = dpw.solver
     timer = sol.timer
     tree = dpw.tree
     s = snode.s_label
-    dpw.reset_callback(dpw.mdp, s)  # Optional: Used to reset/reinitialize MDP to a given state.
+
+    for i in tree.cdf_est.last_i+1:length(dpw.mdp.costs)
+        ImportanceWeightedRiskMetrics.update!(tree.cdf_est, dpw.mdp.costs[i], exp(dpw.mdp.IS_weights[i]))
+    end
+
     if isterminal(dpw.mdp, s)
-        return 0.0
-    elseif d == 0 || (timeout_s > 0.0 && timer() > timeout_s)
-        return estimate_value(dpw.solved_estimate, dpw.mdp, s, w, d)
+        return 0.0, w
+    elseif d == 0
+        q_samp, w_samp = estimate_value(dpw.solved_estimate, dpw.mdp, s, w, d)
+        return q_samp, w_samp
     end
 
     # Action progressive widening.
@@ -147,7 +168,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int, time
         end
     elseif n_children(snode) == 0
         Base.@lock tree.state_action_nodes_lock begin
-            for a in actions(dpw.mdp, s)
+            for a in support(actions(dpw.mdp, s))
                 insert_action_node!(tree, snode, a,
                                     init_N(sol.init_N, dpw.mdp, s, a),
                                     init_Q(sol.init_Q, dpw.mdp, s, a))
@@ -155,67 +176,66 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int, time
         end
     end
 
-    sanode, q_logprob = Base.@lock snode.s_lock begin; sample_sanode_UCB(tree, snode, sol.exploration_constant, sol.virtual_loss); end
+    sanode, q_logprob = Base.@lock snode.s_lock begin; sample_sanode_UCB(dpw, snode, β, γ, schedule); end
     a = sanode.a_label
-    w_node = compute_IS_weight(q_logprob, a, use_prior ? actions(dpw.mdp, s) : nothing) 
+    w_node = compute_IS_weight(q_logprob, a, actions(dpw.mdp, s))
     w = w + w_node
 
     # State progressive widening.
-    sp, r, spnode = nothing, nothing, nothing
+    sp, r = @gen(:sp, :r)(dpw.mdp, s, [a, w], dpw.rng)
+    spnode = nothing
     new_node = false
     Base.@lock sanode.a_lock begin
-        if ((dpw.solver.enable_state_pw && n_a_children(sanode) <= sol.k_state * n(sanode)^sol.alpha_state) ||
-            n_a_children(sanode) == 0)
-            sp, r = @gen(:sp, :r)(dpw.mdp, s, [a, w], dpw.rng)
-
-            spnode = Base.@lock tree.state_nodes_lock begin; insert_state_node!(tree, sp); end
-            new_node = (n_children(spnode) == 0)
-            push!(sanode.transitions, (sp, r))
-
-            sanode.n_a_children += 1
-            push!(sanode.unique_transitions, sp)
+        if n_a_children(sanode) > 0
+            sp_old, _ = rand(dpw.rng, sanode.transitions)
+            spnode = tree.state_nodes[sp_old]
+            Base.@lock tree.state_nodes_lock begin; tree.state_nodes[sp] = spnode; end
         else
-            sp, r = rand(dpw.rng, sanode.transitions)
-            spnode = Base.@lock tree.state_nodes_lock begin; tree.state_nodes[sp]; end
+            spnode = Base.@lock tree.state_nodes_lock begin; insert_state_node!(tree, sp); end
+            new_node = true
+            sanode.n_a_children += 1
         end
+        push!(sanode.transitions, (sp, r))
+        push!(sanode.unique_transitions, sp)
     end
 
     if new_node
-        q = r + discount(dpw.mdp) * estimate_value(dpw.solved_estimate, dpw.mdp, sp, w, d - 1)
+        q_samp, w_samp = estimate_value(dpw.solved_estimate, dpw.mdp, sp, w, d - 1)
+        q = r + discount(dpw.mdp) * q_samp
     else
-        q = r + discount(dpw.mdp) * simulate(dpw, spnode, w, d - 1)
+        q_samp, w_samp = simulate(dpw, spnode, w, d - 1, β, γ, schedule, timeout_s)
+        q = r + discount(dpw.mdp) * q_samp
     end
 
-    function backpropagate(snode::PISStateNode, sanode::PISActionNode, q::Float64)
+    function backpropagate(snode::PISStateNode, sanode::PISActionNode, q::Float64, w_samp::Float64)
         snode.total_n += 1
         sanode.n += 1
         sanode.q += (q - sanode.q) / sanode.n
         delete!(snode.a_selected, sanode.a_label)
+        ImportanceWeightedRiskMetrics.update!(sanode.conditional_cdf_est, q, exp(w_samp))
     end
-    Base.@lock snode.s_lock begin; backpropagate(snode, sanode, q); end
+    Base.@lock snode.s_lock begin; backpropagate(snode, sanode, q, w_samp); end
 
-    return q
+    return q, w_samp
 end
 
 
-function sample_sanode(tree::PISTree, snode::PISStateNode)
-    all_Q = []
-    all_sanodes = []
-    for a_label in children(snode)
-        state_action_key = (snode.s_label, a_label)
-        sanode = tree.state_action_nodes[state_action_key]
-        push!(all_Q, q(sanode))
-        push!(all_sanodes, sanode)
-    end
-    sanode, q_logprob = select_action(all_sanodes, all_Q)
-    return sanode, q_logprob
-end
+function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
+                           β::Float64, γ::Float64, schedule::Float64)
+    mdp = dpw.mdp
+    tree = dpw.tree
+    sol = dpw.solver
+    c = sol.exploration_constant
+    virtual_loss = sol.virtual_loss
+    α = sol.α
 
-
-function sample_sanode_UCB(tree::PISTree, snode::PISStateNode, c::Float64, virtual_loss::Float64=0.0)
     all_UCB = []
     all_sanodes = []
     ltn = log(total_n(snode))
+    cost_α = []
+    prob_α = []
+    prob_p = []
+    all_α = []
     for a_label in children(snode)
         state_action_key = (snode.s_label, a_label)
         sanode = tree.state_action_nodes[state_action_key]
@@ -235,8 +255,39 @@ function sample_sanode_UCB(tree::PISTree, snode::PISStateNode, c::Float64, virtu
         
         push!(all_UCB, UCB)
         push!(all_sanodes, sanode)
+
+        w_annealed = 1.0 / (1.0 + schedule * a_n)
+        a_α = w_annealed + (1 - w_annealed) * α
+        est_quantile = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, α)
+        c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.conditional_cdf_est, est_quantile)
+        c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.conditional_cdf_est, est_quantile)
+        push!(cost_α, c_tail)
+        push!(prob_α, 1.0 - c_cdf)
+        push!(prob_p, pdf(actions(mdp, snode.s_label), a_label))
+        push!(all_α, a_α)
     end
-    sanode, q_logprob = select_action(all_sanodes, all_UCB)
+
+    sanode, q_logprob = select_action(all_sanodes, all_UCB, prob_α, cost_α, prob_p, tree.cdf_est.last_i, all_α, β, γ)
     push!(snode.a_selected, sanode.a_label)
     return sanode, q_logprob
+end
+
+
+"""
+Returns the best action.
+Some publications say to choose action that has been visited the most
+e.g., Continuous Upper Confidence Trees by Couëtoux et al.
+"""
+function best_sanode(tree::PISTree, snode::PISStateNode)
+    best_Q = -Inf
+    best_sa = nothing
+    for a_label in children(snode)
+        state_action_key = (snode.s_label, a_label)
+        sanode = tree.state_action_nodes[state_action_key]
+        if q(sanode) > best_Q
+            best_Q = q(sanode)
+            best_sa = sanode
+        end
+    end
+    return best_sa
 end
