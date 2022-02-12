@@ -1,3 +1,6 @@
+# TODOs:
+# - Move to src.
+
 struct TreeState
     values::Vector{Any}  # Multi-level state.
     costs::Vector{Any}
@@ -49,7 +52,7 @@ end
 function POMDPs.gen(m::TreeMDP, s::TreeState, action, rng)
     a, w = action
     m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, a, rng)
-    sp = TreeState([s.values..., a], [s.costs..., cost], m_sp, isterminal(m.rmdp, m_sp), a)
+    sp = TreeState([s.values..., a], [s.costs..., cost], m_sp, isterminal(m.rmdp, m_sp), w)
 
     r = POMDPs.reward(m, sp, action)
     return (sp=sp, r=r)
@@ -71,14 +74,14 @@ end
 
 function rollout(mdp::TreeMDP, s::TreeState, w::Float64, d::Int64)
     if d == 0 || isterminal(mdp, s)
-        return 0.0
+        return 0.0, w
     else
         p_action = POMDPs.actions(mdp, s)
         a = rand(p_action)
-        
-        (sp, r) = @gen(:sp, :r)(mdp, s, [a, w], Random.GLOBAL_RNG)
-        q_value = r + discount(mdp) * rollout(mdp, sp, w, d-1)
 
-        return q_value
+        (sp, r) = @gen(:sp, :r)(mdp, s, [a, w], Random.GLOBAL_RNG)
+        q_value = r + discount(mdp) * first(rollout(mdp, sp, w, d-1))
+
+        return q_value, w
     end
 end
