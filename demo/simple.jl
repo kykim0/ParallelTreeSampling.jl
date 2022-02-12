@@ -32,7 +32,7 @@ vloss = 0.0
 β = 1.0
 γ = 0.0
 
-path = "/home/kykim/dev/sisl/ParallelTreeSampling/data"
+path = "data"
 
 tree_mdp = create_tree_amdp(mdp, actions; reduction="sum")
 
