@@ -32,7 +32,7 @@ function run_mcts(tree_mdp, fixed_s; N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, �
                        exploration_constant=c,
                        n_iterations=N,
                        enable_state_pw=false,   # Required.
-                       show_progress=false,
+                       show_progress=true,
                        tree_in_info=true,
                        virtual_loss=vloss,
                        α=α);
