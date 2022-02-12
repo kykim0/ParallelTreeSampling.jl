@@ -117,7 +117,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0
         end
 
         p.reset_callback(p.mdp, s)  # Optional: Leave the MDP in the current state.
-        info[:search_time_us] = (timer() - start_s) * 1e6
+        info[:search_time_s] = (timer() - start_s)
         info[:tree_queries] = nquery
         if p.solver.tree_in_info || tree_in_info
             info[:tree] = tree

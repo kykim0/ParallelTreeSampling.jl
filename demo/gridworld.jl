@@ -102,11 +102,12 @@ tree_mdp = create_tree_amdp(amdp, disturbance; reduction="sum")
 
 baseline_out = run_baseline(amdp, fixed_s, disturbance; N)
 mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+mcts_info = mcts_out[4]
 
 save(joinpath(path, "gridworld_baseline_$(N).jld2"),
      Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
 save(joinpath(path, "gridworld_mcts_$(N).jld2"),
-     Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_out[4]))
+     Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
 
 alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
 
@@ -117,7 +118,8 @@ for alpha in alpha_list
 end
 
 println()
-println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ)")
+search_t = round(mcts_info[:search_time_s]; digits=3)
+println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ), time=$(search_t)s")
 for alpha in alpha_list
     m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
     println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")

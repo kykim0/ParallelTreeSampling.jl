@@ -38,7 +38,7 @@ function run_mcts(tree_mdp, fixed_s; N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, �
                        α=α);
     planner = solve(solver, tree_mdp);
     a, info = action_info(planner, TreeState(fixed_s); tree_in_info=true, β=β, γ=γ)
-    output = (planner.mdp.costs, [], planner.mdp.IS_weights, info[:tree])
+    output = (planner.mdp.costs, [], planner.mdp.IS_weights, info)
     return output, planner
 end
 

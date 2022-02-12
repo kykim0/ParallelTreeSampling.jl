@@ -38,11 +38,12 @@ tree_mdp = create_tree_amdp(mdp, actions; reduction="sum")
 
 baseline_out = run_baseline(mdp, fixed_s, actions; N)
 mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+mcts_info = mcts_out[4]
 
 save(joinpath(path, "simple_baseline_$(N).jld2"),
      Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
 save(joinpath(path, "simple_mcts_$(N).jld2"),
-     Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_out[4]))
+     Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
 
 alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
 
