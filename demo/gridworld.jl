@@ -87,40 +87,48 @@ end
 
 fixed_s = rand(initialstate(amdp))
 
-N = 100_000;
-# N = 10_000_000;
-c = 0.0;
-α = 0.001;
-
-β = 0.1;
-γ = 0.3;
+N = 100_000
+base_N = 10_000_000
+c = 0.0
+α = 0.001
+β = 0.1
+γ = 0.3
 vloss = 0.0
+is_baseline = false
 
 path = "data"
 
 tree_mdp = create_tree_amdp(amdp, disturbance; reduction="sum")
 
-baseline_out = run_baseline(amdp, fixed_s, disturbance; N)
-mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
-mcts_info = mcts_out[4]
-
-save(joinpath(path, "gridworld_baseline_$(N).jld2"),
-     Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
-save(joinpath(path, "gridworld_mcts_$(N).jld2"),
-     Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
-
 alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
 
-println("Baseline metrics")
-for alpha in alpha_list
-    m = eval_metrics(baseline_out[1]; alpha)
-    println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+
+function baseline()
+    baseline_out = run_baseline(amdp, fixed_s, disturbance; N=base_N)
+    save(joinpath(path, "gridworld_baseline_$(N).jld2"),
+         Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
+    println("Baseline metrics")
+
+    for alpha in alpha_list
+        m = eval_metrics(baseline_out[1]; alpha)
+        println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+    end
 end
 
-println()
-search_t = round(mcts_info[:search_time_s]; digits=3)
-println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ), time=$(search_t)s")
-for alpha in alpha_list
-    m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
-    println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+
+function mcts()
+    mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+    mcts_info = mcts_out[4]
+    save(joinpath(path, "gridworld_mcts_$(N).jld2"),
+         Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
+    search_t = round(mcts_info[:search_time_s]; digits=3)
+    println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ), time=$(search_t)s")
+
+    for alpha in alpha_list
+        m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
+        println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+    end
 end
+
+
+is_baseline ? baseline() : mcts()

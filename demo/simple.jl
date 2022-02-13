@@ -26,36 +26,46 @@ mdp = SimpleMDP()
 fixed_s = rand(initialstate(mdp))
 
 N = 1000
+base_N = 1000
 c = 0.3
 vloss = 0.0
 α = 0.1
 β = 1.0
 γ = 0.0
+is_baseline = false
 
 path = "data"
 
 tree_mdp = create_tree_amdp(mdp, actions; reduction="sum")
 
-baseline_out = run_baseline(mdp, fixed_s, actions; N)
-mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
-mcts_info = mcts_out[4]
+alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
+
+function baseline()
+    baseline_out = run_baseline(mdp, fixed_s, actions; N=base_N)
 save(joinpath(path, "simple_baseline_$(N).jld2"),
      Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
-save(joinpath(path, "simple_mcts_$(N).jld2"),
-     Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
+    println("Baseline metrics")
 
-alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
-
-println("Baseline metrics")
-for alpha in alpha_list
-    m = eval_metrics(baseline_out[1]; alpha)
-    println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+    for alpha in alpha_list
+        m = eval_metrics(baseline_out[1]; alpha)
+        println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+    end
 end
 
-println()
-println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ)")
-for alpha in alpha_list
-    m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
-    println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+
+function mcts()
+    mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+    mcts_info = mcts_out[4]
+    save(joinpath(path, "simple_mcts_$(N).jld2"),
+         Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
+
+    println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ)")
+    for alpha in alpha_list
+        m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
+        println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+    end
 end
+
+
+is_baseline ? baseline() : mcts()
