@@ -11,7 +11,7 @@ unicodeplots()
 
 # Basic MDP.
 tprob = 0.7
-Random.seed!(10)
+Random.seed!(0)
 randcosts = Dict(POMDPGym.GWPos(i,j) => rand() for i = 1:10, j=1:10)
 # zerocosts = Dict(POMDPGym.GWPos(i,j) => 0.0 for i = 1:10, j=1:10)
 mdp = GridWorldMDP(costs=randcosts, cost_penalty=0.1, tprob=tprob)
