@@ -100,19 +100,20 @@ path = "data"
 
 tree_mdp = create_tree_amdp(amdp, disturbance; reduction="sum")
 
-alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5];
+alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
 
 function baseline()
     baseline_out = run_baseline(amdp, fixed_s, disturbance; N=base_N)
     save(joinpath(path, "gridworld_baseline_$(N).jld2"),
          Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
-    println("Baseline metrics")
 
+    d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
         m = eval_metrics(baseline_out[1]; alpha)
-        println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+        d[alpha][:mean] = m.mean; d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
     end
+    return d
 end
 
 
@@ -122,13 +123,39 @@ function mcts()
     save(joinpath(path, "gridworld_mcts_$(N).jld2"),
          Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
     search_t = round(mcts_info[:search_time_s]; digits=3)
-    println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ), time=$(search_t)s")
 
+    d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
         m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
-        println("[Alpha=$(alpha)] Mean: $(m.mean), VaR: $(m.var), CVaR: $(m.cvar), Worst: $(m.worst)")
+        d[alpha][:mean] = m.mean; d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
     end
+    return d, search_t
 end
 
 
-is_baseline ? baseline() : mcts()
+metrics = []
+times = []
+num_iter = 2
+for _ in 1:num_iter
+    if is_baseline
+        push!(metrics, baseline())
+    else
+        metric_d, search_t = mcts()
+        push!(metrics, metric_d)
+        push!(times, search_t)
+    end
+end
+
+if is_baseline
+    println("Baseline metrics")
+else
+    println("TIS metrics: N=$(N), c=$(c), α=$(α), β=$(β), γ=$(γ)")
+end
+
+for (idx, metric) in enumerate(metrics)
+    println("Run $(idx)")
+    for (alpha, m_d) in metric
+        println("  [Alpha=$(alpha)] Mean: $(m_d[:mean]), VaR: $(m_d[:var]), CVaR: $(m_d[:cvar]), Worst: $(m_d[:worst])")
+    end
+end
+println("Times: $(times)")
