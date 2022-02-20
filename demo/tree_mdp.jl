@@ -2,7 +2,6 @@
 # - Move to src.
 
 struct TreeState
-    values::Vector{Any}  # Multi-level state.
     costs::Vector{Any}
     mdp_state::Any
     w::Float64  # Importance sampling weight.
@@ -10,8 +9,8 @@ end
 
 
 # Initial state ctors.
-TreeState(mdp_state::Any) = TreeState([], [0.0], mdp_state, 0.0)
-TreeState(state::TreeState, w::Float64) = TreeState(state.values, state.costs, state.mdp_state, w)
+TreeState(mdp_state::Any) = TreeState([0.0], mdp_state, 0.0)
+TreeState(state::TreeState, w::Float64) = TreeState(state.costs, state.mdp_state, w)
 
 
 # Tree MDP type.
@@ -51,7 +50,7 @@ end
 function POMDPs.gen(m::TreeMDP, s::TreeState, action, rng)
     a, w = action
     m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, a, rng)
-    sp = TreeState([s.values..., a], [s.costs..., cost], m_sp, w)
+    sp = TreeState([s.costs..., cost], m_sp, w)
 
     r = POMDPs.reward(m, sp, action)
     return (sp=sp, r=r)
