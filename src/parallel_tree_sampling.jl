@@ -182,21 +182,24 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int,
     w = w + w_node
 
     # State progressive widening.
-    sp, r = @gen(:sp, :r)(dpw.mdp, s, [a, w], dpw.rng)
     spnode = nothing
     new_node = false
-    Base.@lock sanode.a_lock begin
-        if n_a_children(sanode) > 0
-            sp_old, _ = rand(dpw.rng, sanode.transitions)
-            spnode = tree.state_nodes[sp_old]
-            Base.@lock tree.state_nodes_lock begin; tree.state_nodes[sp] = spnode; end
-        else
-            spnode = Base.@lock tree.state_nodes_lock begin; insert_state_node!(tree, sp); end
-            new_node = true
-            sanode.n_a_children += 1
+    if (n_a_children(sanode) <= sol.k_state * n(sanode)^sol.alpha_state) || n_a_children(sanode) == 0
+        sp, r = @gen(:sp, :r)(dpw.mdp, s, [a, w], dpw.rng)
+        Base.@lock tree.state_nodes_lock begin
+            if haskey(tree.state_nodes, sp) 
+                spnode = tree.state_nodes[sp]
+            else
+                spnode = insert_state_node!(tree, sp)
+                new_node = true
+                sanode.n_a_children += 1
+            end
         end
         push!(sanode.transitions, (sp, r))
         push!(sanode.unique_transitions, sp)
+    else
+        sp, r = rand(dpw.rng, sanode.transitions)
+        spnode = Base.@lock tree.state_nodes_lock begin; tree.state_nodes[sp]; end
     end
 
     if new_node
