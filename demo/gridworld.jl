@@ -135,8 +135,9 @@ end
 
 metrics = []
 times = []
-num_iter = 2
-for _ in 1:num_iter
+num_iter = 3
+for idx in 1:num_iter
+    Random.seed!(idx-1)
     if is_baseline
         push!(metrics, baseline())
     else
@@ -154,7 +155,8 @@ end
 
 for (idx, metric) in enumerate(metrics)
     println("Run $(idx)")
-    for (alpha, m_d) in metric
+    for alpha in alpha_list
+        m_d = metric[alpha]
         println("  [Alpha=$(alpha)] Mean: $(m_d[:mean]), VaR: $(m_d[:var]), CVaR: $(m_d[:cvar]), Worst: $(m_d[:worst])")
     end
 end
