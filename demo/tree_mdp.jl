@@ -5,14 +5,13 @@ struct TreeState
     values::Vector{Any}  # Multi-level state.
     costs::Vector{Any}
     mdp_state::Any
-    done::Bool
     w::Float64  # Importance sampling weight.
 end
 
 
 # Initial state ctors.
-TreeState(mdp_state::Any) = TreeState([], [0.0], mdp_state, false, 0.0)
-TreeState(state::TreeState, w::Float64) = TreeState(state.values, state.costs, state.mdp_state, state.done, w)
+TreeState(mdp_state::Any) = TreeState([], [0.0], mdp_state, 0.0)
+TreeState(state::TreeState, w::Float64) = TreeState(state.values, state.costs, state.mdp_state, w)
 
 
 # Tree MDP type.
@@ -27,7 +26,7 @@ end
 
 
 function POMDPs.reward(mdp::TreeMDP, state::TreeState, action)
-    if !state.done
+    if !isterminal(mdp, state)
         r = 0
     else
         if mdp.reduction == "sum"
@@ -52,7 +51,7 @@ end
 function POMDPs.gen(m::TreeMDP, s::TreeState, action, rng)
     a, w = action
     m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, a, rng)
-    sp = TreeState([s.values..., a], [s.costs..., cost], m_sp, isterminal(m.rmdp, m_sp), w)
+    sp = TreeState([s.values..., a], [s.costs..., cost], m_sp, w)
 
     r = POMDPs.reward(m, sp, action)
     return (sp=sp, r=r)
@@ -60,7 +59,7 @@ end
 
 
 function POMDPs.isterminal(mdp::TreeMDP, s::TreeState)
-    return s.done
+    return isterminal(mdp.rmdp, s.mdp_state)
 end
 
 
