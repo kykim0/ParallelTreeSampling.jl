@@ -4,13 +4,12 @@
 struct TreeState
     costs::Vector{Any}
     mdp_state::Any
-    w::Float64  # Importance sampling weight.
 end
 
 
 # Initial state ctors.
-TreeState(mdp_state::Any) = TreeState([0.0], mdp_state, 0.0)
-TreeState(state::TreeState, w::Float64) = TreeState(state.costs, state.mdp_state, w)
+TreeState(mdp_state::Any) = TreeState([0.0], mdp_state)
+TreeState(state::TreeState, w::Float64) = TreeState(state.costs, state.mdp_state)
 
 
 # Tree MDP type.
@@ -25,6 +24,7 @@ end
 
 
 function POMDPs.reward(mdp::TreeMDP, state::TreeState, action)
+    _, w = action
     if !isterminal(mdp, state)
         r = 0
     else
@@ -36,7 +36,7 @@ function POMDPs.reward(mdp::TreeMDP, state::TreeState, action)
             throw("Not implemented reduction $(mdp.reduction)!")
         end
         push!(mdp.costs, r)
-        push!(mdp.IS_weights, state.w)
+        push!(mdp.IS_weights, w)
     end
     return r
 end
@@ -50,7 +50,7 @@ end
 function POMDPs.gen(m::TreeMDP, s::TreeState, action, rng)
     a, w = action
     m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, a, rng)
-    sp = TreeState([s.costs..., cost], m_sp, w)
+    sp = TreeState([s.costs..., cost], m_sp)
 
     r = POMDPs.reward(m, sp, action)
     return (sp=sp, r=r)
