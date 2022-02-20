@@ -111,7 +111,8 @@ function baseline()
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
         m = eval_metrics(baseline_out[1]; alpha)
-        d[alpha][:mean] = m.mean; d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
+        d[alpha][:N] = length(baseline_out[1]); d[alpha][:mean] = m.mean;
+        qd[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
     end
     return d
 end
@@ -127,7 +128,8 @@ function mcts()
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
         m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
-        d[alpha][:mean] = m.mean; d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
+        d[alpha][:N] = length(mcts_out[1]); d[alpha][:mean] = m.mean;
+        d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
     end
     return d, search_t
 end
@@ -157,7 +159,8 @@ for (idx, metric) in enumerate(metrics)
     println("Run $(idx)")
     for alpha in alpha_list
         m_d = metric[alpha]
-        println("  [Alpha=$(alpha)] Mean: $(m_d[:mean]), VaR: $(m_d[:var]), CVaR: $(m_d[:cvar]), Worst: $(m_d[:worst])")
+        println(string("  [Alpha=$(alpha)] N: $(m_d[:N]), Mean: $(m_d[:mean]), ",
+                       "VaR: $(m_d[:var]), CVaR: $(m_d[:cvar]), Worst: $(m_d[:worst])"))
     end
 end
 println("Times: $(times)")
