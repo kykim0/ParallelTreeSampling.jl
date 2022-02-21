@@ -204,9 +204,12 @@ mutable struct PISTree{S,A}
     state_action_nodes::Dict{Tuple{S,A}, PISActionNode}
 
     cdf_est::RunningCDFEstimator
+    costs::Vector{Float64}
+    weights::Vector{Float64}
 
     state_nodes_lock::ReentrantLock
     state_action_nodes_lock::ReentrantLock
+    costs_weights_lock::ReentrantLock
 
     # Used to assign unique ids to nodes.
     _s_id_counter::Threads.Atomic{Int}
@@ -218,7 +221,10 @@ mutable struct PISTree{S,A}
                    Dict{Tuple{S,A}, PISActionNode}(),
 
                    RunningCDFEstimator([0.0], [1e-7]),
+                   sizehint!(Float64[], 10_000),
+                   sizehint!(Float64[], 10_000),
 
+                   ReentrantLock(),
                    ReentrantLock(),
                    ReentrantLock(),
 

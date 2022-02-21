@@ -1,11 +1,13 @@
 POMDPs.solve(solver::PISSolver, mdp::Union{POMDP,MDP}) = PISPlanner(solver, mdp)
 
+
 """
 Deletes existing decision tree.
 """
 function clear_tree!(p::PISPlanner)
     p.tree = nothing
 end
+
 
 """
 Utility function for numerically stable softmax.
@@ -52,9 +54,9 @@ end
 
 
 """
-Calculates IS weights.
+Calculates importance sampling weights.
 """
-function compute_IS_weight(q_logprob, a, distribution)
+function compute_weight(q_logprob, a, distribution)
     if distribution == nothing
         w = -q_logprob
     else
@@ -63,17 +65,22 @@ function compute_IS_weight(q_logprob, a, distribution)
     return w
 end
 
+
 """
 Constructs a PISTree and choose an action.
 """
 POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 
-MCTS.estimate_value(f::Function, mdp::Union{POMDP,MDP}, state, w::Float64, depth::Int) = f(mdp, state, w, depth)
+function MCTS.estimate_value(f::Function, mdp::Union{POMDP,MDP}, state, depth::Int,
+                             cost::Float64, weight::Float64)
+    return f(mdp, state, depth, cost, weight)
+end
+
 
 """
 Constructs a PISTree and choose the best action.
 """
-function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0, β=0.0, γ=1.0, schedule=0.1)
+function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.0, γ=1.0, schedule=0.1)
     local a::actiontype(p.mdp)
     info = Dict{Symbol, Any}()
     try
@@ -93,9 +100,11 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, w=0.0
         timeout_s = start_s + p.solver.max_time
         n_iterations = p.solver.n_iterations
         p.solver.show_progress ? progress = Progress(n_iterations) : nothing
+
         sim_channel = Channel{Task}(min(1000, n_iterations)) do channel
             for n in 1:n_iterations
-                put!(channel, Threads.@spawn simulate(p, snode, w, p.solver.depth, β, γ, schedule, timeout_s))
+                put!(channel, Threads.@spawn simulate(p, snode, p.solver.depth, 0.0, 0.0,
+                                                      β, γ, schedule, timeout_s))
             end
         end
 
@@ -135,9 +144,32 @@ end
 
 
 """
+Adds a sample to the tree.
+"""
+function add_sample!(tree::PISTree, cost::Float64, weight::Float64)
+    push!(tree.costs, cost)
+    push!(tree.weights, weight)
+end
+
+
+"""
+Updates the accumulated cost.
+"""
+function update_cost(acc_cost::Float64, new_cost::Union{Int64, Float64}, reduction::String)
+    if reduction == "sum"
+        return acc_cost + new_cost
+    elseif reduction == "max"
+        return max(acc_cost, new_cost)
+    end
+    throw("Not implemented reduction $(reduction)!")
+end
+
+
+"""
 Returns the reward for one iteration of MCTS.
 """
-function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int,
+function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
+                  cost::Float64, weight::Float64,
                   β::Float64=0.0, γ::Float64=1.0, schedule::Float64=0.1,
                   timeout_s::Float64=0.0)
     sol = dpw.solver
@@ -145,15 +177,17 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int,
     tree = dpw.tree
     s = snode.s_label
 
-    for i in tree.cdf_est.last_i+1:length(dpw.mdp.costs)
-        ImportanceWeightedRiskMetrics.update!(tree.cdf_est, dpw.mdp.costs[i], exp(dpw.mdp.IS_weights[i]))
+    for i in tree.cdf_est.last_i+1:length(tree.costs)
+        ImportanceWeightedRiskMetrics.update!(tree.cdf_est, tree.costs[i], exp(tree.weights[i]))
     end
 
     if isterminal(dpw.mdp, s)
-        return 0.0, w
+        add_sample!(tree, cost, weight)
+        return cost, weight
     elseif d == 0
-        q_samp, w_samp = estimate_value(dpw.solved_estimate, dpw.mdp, s, w, d)
-        return q_samp, w_samp
+        out_cost, out_weight = estimate_value(dpw.solved_estimate, dpw.mdp, s, d, cost, weight)
+        add_sample!(tree, out_cost, out_weight)
+        return out_cost, out_weight
     end
 
     # Action progressive widening.
@@ -178,14 +212,13 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int,
 
     sanode, q_logprob = Base.@lock snode.s_lock begin; sample_sanode_UCB(dpw, snode, β, γ, schedule); end
     a = sanode.a_label
-    w_node = compute_IS_weight(q_logprob, a, actions(dpw.mdp, s))
-    w = w + w_node
+    w_node = compute_weight(q_logprob, a, actions(dpw.mdp, s))
 
     # State progressive widening.
     spnode = nothing
     new_node = false
     if (n_a_children(sanode) <= sol.k_state * n(sanode)^sol.alpha_state) || n_a_children(sanode) == 0
-        sp, r = @gen(:sp, :r)(dpw.mdp, s, [a, w], dpw.rng)
+        sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
         Base.@lock tree.state_nodes_lock begin
             if haskey(tree.state_nodes, sp) 
                 spnode = tree.state_nodes[sp]
@@ -202,24 +235,27 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, w::Float64, d::Int,
         spnode = Base.@lock tree.state_nodes_lock begin; tree.state_nodes[sp]; end
     end
 
+    new_weight = weight + w_node
+    new_cost = update_cost(cost, r, dpw.mdp.reduction)
     if new_node
-        q_samp, w_samp = estimate_value(dpw.solved_estimate, dpw.mdp, sp, w, d - 1)
-        q = r + discount(dpw.mdp) * q_samp
+        out_cost, out_weight = estimate_value(dpw.solved_estimate, dpw.mdp, sp, d - 1, new_cost, new_weight)
+        add_sample!(tree, out_cost, out_weight)
+        q = discount(dpw.mdp) * out_cost
     else
-        q_samp, w_samp = simulate(dpw, spnode, w, d - 1, β, γ, schedule, timeout_s)
-        q = r + discount(dpw.mdp) * q_samp
+        out_cost, out_weight = simulate(dpw, spnode, d - 1, new_cost, new_weight, β, γ, schedule, timeout_s)
+        q = discount(dpw.mdp) * out_cost
     end
 
-    function backpropagate(snode::PISStateNode, sanode::PISActionNode, q::Float64, w_samp::Float64)
+    function backpropagate(snode::PISStateNode, sanode::PISActionNode, q::Float64, w::Float64)
         snode.total_n += 1
         sanode.n += 1
         sanode.q += (q - sanode.q) / sanode.n
         delete!(snode.a_selected, sanode.a_label)
-        ImportanceWeightedRiskMetrics.update!(sanode.conditional_cdf_est, q, exp(w_samp))
+        ImportanceWeightedRiskMetrics.update!(sanode.conditional_cdf_est, q, exp(w))
     end
-    Base.@lock snode.s_lock begin; backpropagate(snode, sanode, q, w_samp); end
+    Base.@lock snode.s_lock begin; backpropagate(snode, sanode, q, out_weight); end
 
-    return q, w_samp
+    return out_cost, out_weight
 end
 
 

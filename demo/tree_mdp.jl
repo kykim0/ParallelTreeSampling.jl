@@ -1,44 +1,24 @@
 # TODOs:
 # - Move to src.
+# - Try adding logprob in rollout.
 
 struct TreeState
-    costs::Vector{Any}
+    name::String  # TOOD: Clean up.
     mdp_state::Any
 end
 
 
 # Initial state ctors.
-TreeState(mdp_state::Any) = TreeState([0.0], mdp_state)
-TreeState(state::TreeState, w::Float64) = TreeState(state.costs, state.mdp_state)
+TreeState(mdp_state::Any) = TreeState("TreeState", mdp_state)
+TreeState(state::TreeState) = TreeState(state.mdp_state)
 
 
 # Tree MDP type.
 mutable struct TreeMDP <: MDP{TreeState, Any}
     rmdp::Any
     discount_factor::Float64
-    costs::Vector
-    IS_weights::Vector
     distribution::Any
     reduction::String
-end
-
-
-function POMDPs.reward(mdp::TreeMDP, state::TreeState, action)
-    _, w = action
-    if !isterminal(mdp, state)
-        r = 0
-    else
-        if mdp.reduction == "sum"
-            r = sum(state.costs)
-        elseif mdp.reduction == "max"
-            r = maximum(state.costs)
-        else
-            throw("Not implemented reduction $(mdp.reduction)!")
-        end
-        push!(mdp.costs, r)
-        push!(mdp.IS_weights, w)
-    end
-    return r
 end
 
 
@@ -48,12 +28,9 @@ end
 
 
 function POMDPs.gen(m::TreeMDP, s::TreeState, action, rng)
-    a, w = action
-    m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, a, rng)
-    sp = TreeState([s.costs..., cost], m_sp)
-
-    r = POMDPs.reward(m, sp, action)
-    return (sp=sp, r=r)
+    m_sp, cost = @gen(:sp, :r)(m.rmdp, s.mdp_state, action, rng)
+    sp = TreeState(m_sp)
+    return (sp=sp, r=cost)
 end
 
 
@@ -70,16 +47,26 @@ function POMDPs.actions(mdp::TreeMDP, s::TreeState)
 end
 
 
-function rollout(mdp::TreeMDP, s::TreeState, w::Float64, d::Int64)
+function rollout(mdp::TreeMDP, s::TreeState, d::Int64,
+                 cost::Float64, weight::Float64)
     if d == 0 || isterminal(mdp, s)
-        return 0.0, w
+        return cost, weight
     else
         p_action = POMDPs.actions(mdp, s)
-        a = rand(p_action)
+        action = rand(p_action)
 
-        (sp, r) = @gen(:sp, :r)(mdp, s, [a, w], Random.GLOBAL_RNG)
-        q_value = r + discount(mdp) * first(rollout(mdp, sp, w, d-1))
-
-        return q_value, w
+        (sp, r) = @gen(:sp, :r)(mdp, s, action, Random.GLOBAL_RNG)
+        new_cost = update_cost(cost, r, mdp.reduction)
+        return rollout(mdp, sp, d - 1, cost, weight)
     end
+end
+
+
+function update_cost(acc_cost::Float64, new_cost::Union{Int64, Float64}, reduction::String)
+    if reduction == "sum"
+        return acc_cost + new_cost
+    elseif reduction == "max"
+        return max(acc_cost, new_cost)
+    end
+    throw("Not implemented reduction $(reduction)!")
 end
