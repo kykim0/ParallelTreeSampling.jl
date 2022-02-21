@@ -71,9 +71,9 @@ Constructs a PISTree and choose an action.
 """
 POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 
-function MCTS.estimate_value(f::Function, mdp::Union{POMDP,MDP}, state, depth::Int,
-                             cost::Float64, weight::Float64)
-    return f(mdp, state, depth, cost, weight)
+function estimate_value(mdp::Union{POMDP,MDP}, state::TreeState,
+                        depth::Int, cost::Float64, weight::Float64)
+    return rollout(mdp, state, depth, cost, weight)
 end
 
 
@@ -153,19 +153,6 @@ end
 
 
 """
-Updates the accumulated cost.
-"""
-function update_cost(acc_cost::Float64, new_cost::Union{Int64, Float64}, reduction::String)
-    if reduction == "sum"
-        return acc_cost + new_cost
-    elseif reduction == "max"
-        return max(acc_cost, new_cost)
-    end
-    throw("Not implemented reduction $(reduction)!")
-end
-
-
-"""
 Returns the reward for one iteration of MCTS.
 """
 function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
@@ -185,7 +172,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         add_sample!(tree, cost, weight)
         return cost, weight
     elseif d == 0
-        out_cost, out_weight = estimate_value(dpw.solved_estimate, dpw.mdp, s, d, cost, weight)
+        out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight)
         add_sample!(tree, out_cost, out_weight)
         return out_cost, out_weight
     end
@@ -238,7 +225,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     new_weight = weight + w_node
     new_cost = update_cost(cost, r, dpw.mdp.reduction)
     if new_node
-        out_cost, out_weight = estimate_value(dpw.solved_estimate, dpw.mdp, sp, d - 1, new_cost, new_weight)
+        out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost, new_weight)
         add_sample!(tree, out_cost, out_weight)
         q = discount(dpw.mdp) * out_cost
     else
