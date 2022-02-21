@@ -1,5 +1,4 @@
 # TODOs:
-# - Move to src.
 # - Try adding logprob in rollout.
 
 struct TreeState
@@ -59,14 +58,4 @@ function rollout(mdp::TreeMDP, s::TreeState, d::Int64,
         new_cost = update_cost(cost, r, mdp.reduction)
         return rollout(mdp, sp, d - 1, cost, weight)
     end
-end
-
-
-function update_cost(acc_cost::Float64, new_cost::Union{Int64, Float64}, reduction::String)
-    if reduction == "sum"
-        return acc_cost + new_cost
-    elseif reduction == "max"
-        return max(acc_cost, new_cost)
-    end
-    throw("Not implemented reduction $(reduction)!")
 end

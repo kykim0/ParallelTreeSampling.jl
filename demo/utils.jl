@@ -7,8 +7,6 @@ using POMDPs
 using POMDPSimulators
 using Random
 
-include("tree_mdp.jl")
-
 
 # Creates an instance of TreeMDP.
 function create_tree_amdp(amdp, distribution; reduction="sum")
@@ -28,7 +26,6 @@ end
 # Runs MCTS-based sampling.
 function run_mcts(tree_mdp, fixed_s; N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, γ=0.0)
     solver = PISSolver(; depth=100,
-                       estimate_value=rollout,  # Required.
                        exploration_constant=c,
                        n_iterations=N,
                        enable_state_pw=false,   # Required.

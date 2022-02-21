@@ -45,12 +45,6 @@ Fields:
         default: false
     rng::AbstractRNG
         Random number generator
-    estimate_value::Any (rollout policy)
-        Function, object, or number used to estimate the value at the leaf nodes.
-        If this is a function `f`, `f(mdp, s, depth)` will be called to estimate the value.
-        If this is an object `o`, `estimate_value(o, mdp, s, depth)` will be called.
-        If this is a number, the value will be set to that number.
-        default: RolloutEstimator(RandomSolver(rng))
     init_Q::Any
         Function, object, or number used to set the initial Q(s,a) value at a new node.
         If this is a function `f`, `f(mdp, s, a)` will be called to set the value.
@@ -105,7 +99,6 @@ mutable struct PISSolver
     check_repeat_action::Bool
     tree_in_info::Bool
     rng::AbstractRNG
-    estimate_value::Any
     init_Q::Any
     init_N::Any
     next_action::Any
@@ -145,7 +138,6 @@ function PISSolver(;depth::Int=10,
                    check_repeat_action::Bool=true,
                    tree_in_info::Bool=false,
                    rng::AbstractRNG=Random.GLOBAL_RNG,
-                   estimate_value::Any=RolloutEstimator(RandomSolver(rng)),
                    init_Q::Any=0.0,
                    init_N::Any=1,
                    next_action::Any=UniformActionGenerator(rng),
@@ -156,7 +148,7 @@ function PISSolver(;depth::Int=10,
                    α::Float64=0.1)
     PISSolver(depth, exploration_constant, n_iterations, max_time, k_action, alpha_action, k_state, alpha_state, virtual_loss,
               keep_tree, enable_action_pw, enable_state_pw, check_repeat_state, check_repeat_action, tree_in_info, rng,
-              estimate_value, init_Q, init_N, next_action, default_action, reset_callback, show_progress, timer, α)
+              init_Q, init_N, next_action, default_action, reset_callback, show_progress, timer, α)
 end
 
 
@@ -257,11 +249,10 @@ function insert_action_node!(tree::PISTree{S,A}, snode::PISStateNode{S,A}, a::A,
 end
 
 
-mutable struct PISPlanner{P<:Union{MDP,POMDP}, S, A, SE, NA, RCB, RNG}
+mutable struct PISPlanner{P<:Union{MDP,POMDP}, S, A, NA, RCB, RNG}
     solver::PISSolver
     mdp::P
     tree::Union{Nothing, PISTree{S,A}}
-    solved_estimate::SE
     next_action::NA
     reset_callback::RCB
     rng::RNG
@@ -269,18 +260,15 @@ end
 
 
 function PISPlanner(solver::PISSolver, mdp::P) where P<:Union{POMDP,MDP}
-    se = MCTS.convert_estimator(solver.estimate_value, solver, mdp)
     return PISPlanner{P,
                       statetype(P),
                       actiontype(P),
-                      typeof(se),
                       typeof(solver.next_action),
                       typeof(solver.reset_callback),
                       typeof(solver.rng)}(
                           solver,
                           mdp,
                           nothing,
-                          se,
                           solver.next_action,
                           solver.reset_callback,
                           solver.rng)
