@@ -76,6 +76,16 @@ function estimate_value(mdp::Union{POMDP,MDP}, state::TreeState,
     return rollout(mdp, state, depth, cost, weight)
 end
 
+function next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s, snode::PISStateNode)
+    rand(gen.rng, actions(mdp, s))
+end
+
+init_Q(f::Function, mdp::Union{MDP,POMDP}, s, a) = f(mdp, s, a)
+init_Q(n::Number, mdp::Union{MDP,POMDP}, s, a) = convert(Float64, n)
+
+init_N(f::Function, mdp::Union{MDP,POMDP}, s, a) = f(mdp, s, a)
+init_N(n::Number, mdp::Union{MDP,POMDP}, s, a) = convert(Int, n)
+
 
 """
 Constructs a PISTree and choose the best action.
@@ -135,7 +145,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.
         sanode = best_sanode(tree, snode)
         a = sanode.a_label
     catch ex
-        a = convert(actiontype(p.mdp), default_action(p.solver.default_action, p.mdp, s, ex))
+        a = next_action(p.next_action, p.mdp, s, snode)
         info[:exception] = ex
     end
 
