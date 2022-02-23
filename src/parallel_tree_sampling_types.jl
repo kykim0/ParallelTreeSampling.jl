@@ -111,12 +111,6 @@ mutable struct UniformActionGenerator{RNG<:AbstractRNG}
 end
 UniformActionGenerator() = UniformActionGenerator(Random.GLOBAL_RNG)
 
-# TODO(kykim): Remove the MCTS dependency.
-function MCTS.next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s, snode::AbstractStateNode)
-    # rand(gen.rng, support(actions(mdp, s)))
-    rand(gen.rng, actions(mdp, s))
-end
-
 """
 Use keyword arguments to specify values for the fields.
 """
@@ -139,7 +133,7 @@ function PISSolver(;depth::Int=10,
                    init_Q::Any=0.0,
                    init_N::Any=1,
                    next_action::Any=UniformActionGenerator(rng),
-                   default_action::Any=ExceptionRethrow(),
+                   default_action::Any=nothing,
                    reset_callback::Function=(mdp, s) -> false,
                    show_progress::Bool=false,
                    timer=() -> 1e-9*time_ns(),
@@ -170,7 +164,7 @@ PISActionNode(id::Int, a::A, n::Int, q::Float64, transitions::Vector{Tuple{S,Flo
 @inline n_a_children(n::PISActionNode) = n.n_a_children
 
 
-mutable struct PISStateNode{S,A} <: AbstractStateNode
+mutable struct PISStateNode{S,A}
     id::Int
     s_label::S
     total_n::Int
