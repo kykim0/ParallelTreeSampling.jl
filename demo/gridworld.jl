@@ -1,6 +1,5 @@
 using POMDPs, POMDPGym, POMDPSimulators, POMDPPolicies, Distributions
 using Crux, Flux, BSON, StaticArrays, Random
-using MCTS
 using FileIO
 using Plots
 using ParallelTreeSampling
