@@ -156,7 +156,7 @@ end
 Returns the reward for one iteration of MCTS.
 """
 function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
-                  cost::Float64, weight::Float64,
+                  cost::Float64=0.0, weight::Float64=0.0,
                   β::Float64=0.0, γ::Float64=1.0, schedule::Float64=0.1,
                   timeout_s::Float64=0.0)
     sol = dpw.solver
@@ -164,16 +164,26 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     tree = dpw.tree
     s = snode.s_label
 
-    for i in tree.cdf_est.last_i+1:length(tree.costs)
-        ImportanceWeightedRiskMetrics.update!(tree.cdf_est, tree.costs[i], exp(tree.weights[i]))
+    Base.@lock tree.costs_weights_lock begin
+        n_samples = length(tree.costs)
+        for i in tree.cdf_est.last_i+1:n_samples
+            # Depending on how fast/slow this is, making copies of costs and weights first then
+            # immediately releasing the lock can be better. But, of course, as we collect more
+            # samples, copying can increasingly be slow.
+            ImportanceWeightedRiskMetrics.update!(tree.cdf_est, tree.costs[i], exp(tree.weights[i]))
+        end
     end
 
     if isterminal(dpw.mdp, s)
-        add_sample!(tree, cost, weight)
+        Base.@lock tree.costs_weights_lock begin
+            add_sample!(tree, cost, weight)
+        end
         return cost, weight
     elseif d == 0
         out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight)
-        add_sample!(tree, out_cost, out_weight)
+        Base.@lock tree.costs_weights_lock begin
+            add_sample!(tree, out_cost, out_weight)
+        end
         return out_cost, out_weight
     end
 
@@ -212,11 +222,15 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
             else
                 spnode = insert_state_node!(tree, sp)
                 new_node = true
-                sanode.n_a_children += 1
             end
         end
-        push!(sanode.transitions, (sp, r))
-        push!(sanode.unique_transitions, sp)
+        Base.@lock sanode.a_lock begin
+            if new_node
+                sanode.n_a_children += 1
+            end
+            push!(sanode.transitions, (sp, r))
+            push!(sanode.unique_transitions, sp)
+        end
     else
         sp, r = rand(dpw.rng, sanode.transitions)
         spnode = Base.@lock tree.state_nodes_lock begin; tree.state_nodes[sp]; end
@@ -226,21 +240,27 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     new_cost = update_cost(cost, r, dpw.mdp.reduction)
     if new_node
         out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost, new_weight)
-        add_sample!(tree, out_cost, out_weight)
+        Base.@lock tree.costs_weights_lock begin
+            add_sample!(tree, out_cost, out_weight)
+        end
         q = discount(dpw.mdp) * out_cost
     else
-        out_cost, out_weight = simulate(dpw, spnode, d - 1, new_cost, new_weight, β, γ, schedule, timeout_s)
+        out_cost, out_weight = simulate(
+            dpw, spnode, d - 1, new_cost, new_weight, β, γ, schedule, timeout_s)
         q = discount(dpw.mdp) * out_cost
     end
 
-    function backpropagate(snode::PISStateNode, sanode::PISActionNode, q::Float64, w::Float64)
-        snode.total_n += 1
-        sanode.n += 1
-        sanode.q += (q - sanode.q) / sanode.n
-        delete!(snode.a_selected, sanode.a_label)
-        ImportanceWeightedRiskMetrics.update!(sanode.conditional_cdf_est, q, exp(w))
+    # Backpropgate and update node values.
+    Base.@lock sanode.a_lock begin
+        Base.@lock snode.s_lock begin
+            snode.total_n += 1
+            delete!(snode.a_selected, sanode.a_label)
+            sanode.n += 1
+            sanode.q += (q - sanode.q) / sanode.n
+            ImportanceWeightedRiskMetrics.update!(
+                sanode.conditional_cdf_est, q, exp(out_weight))
+        end
     end
-    Base.@lock snode.s_lock begin; backpropagate(snode, sanode, q, out_weight); end
 
     return out_cost, out_weight
 end

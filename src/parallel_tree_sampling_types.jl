@@ -77,11 +77,8 @@ Fields:
     show_progress::Bool
         Show progress bar during simulation.
         default: false
-
-TODOs:
-- Remove the MCTS dependency.
-- Clean up some of the settings.
 """
+# TODO(kykim): Clean up some of the settings.
 mutable struct PISSolver
     depth::Int
     exploration_constant::Float64
@@ -114,6 +111,7 @@ mutable struct UniformActionGenerator{RNG<:AbstractRNG}
 end
 UniformActionGenerator() = UniformActionGenerator(Random.GLOBAL_RNG)
 
+# TODO(kykim): Remove the MCTS dependency.
 function MCTS.next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s, snode::AbstractStateNode)
     # rand(gen.rng, support(actions(mdp, s)))
     rand(gen.rng, actions(mdp, s))
@@ -152,6 +150,7 @@ function PISSolver(;depth::Int=10,
 end
 
 
+# TODO(kykim): Try a lock-free approach using Atomics.
 mutable struct PISActionNode{S,A}
     id::Int
     a_label::A
