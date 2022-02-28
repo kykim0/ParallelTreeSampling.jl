@@ -222,22 +222,30 @@ Base.isempty(tree::PISTree) = isempty(tree.state_nodes)
 
 
 function insert_state_node!(tree::PISTree{S,A}, s::S) where {S,A}
-    haskey(tree.state_nodes, s) && return tree.state_nodes[s]
-    id = Threads.atomic_add!(tree._s_id_counter, 1)
-    snode = PISStateNode(id, s, 0, Vector{A}())
-    tree.state_nodes[s] = snode
+    snode = nothing
+    Base.@lock tree.state_nodes_lock begin
+        haskey(tree.state_nodes, s) && return tree.state_nodes[s]
+        id = Threads.atomic_add!(tree._s_id_counter, 1)
+        snode = PISStateNode(id, s, 0, Vector{A}())
+        tree.state_nodes[s] = snode
+    end
     return snode
 end
 
 
 function insert_action_node!(tree::PISTree{S,A}, snode::PISStateNode{S,A}, a::A, n0::Int, q0::Float64) where {S,A}
-    state_action_key = (snode.s_label, a)
-    haskey(tree.state_action_nodes, state_action_key) && return tree.state_action_nodes[state_action_key]
-    id = Threads.atomic_add!(tree._a_id_counter, 1)
-    sanode = PISActionNode(id, a, n0, q0, Vector{Tuple{S,Float64}}())
-    tree.state_action_nodes[state_action_key] = sanode
-    push!(snode.children, a)
-    snode.total_n += n0
+    sanode = nothing
+    Base.@lock tree.state_action_nodes_lock begin
+        state_action_key = (snode.s_label, a)
+        haskey(tree.state_action_nodes, state_action_key) && return tree.state_action_nodes[state_action_key]
+        id = Threads.atomic_add!(tree._a_id_counter, 1)
+        sanode = PISActionNode(id, a, n0, q0, Vector{Tuple{S,Float64}}())
+        tree.state_action_nodes[state_action_key] = sanode
+    end
+    Base.@lock snode.s_lock begin
+        push!(snode.children, a)
+        snode.total_n += n0
+    end
     return sanode
 end
 
