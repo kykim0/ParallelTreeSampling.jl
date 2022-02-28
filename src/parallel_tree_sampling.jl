@@ -201,23 +201,19 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     if sol.enable_action_pw
         if n_children(snode) <= sol.k_action * total_n(snode)^sol.alpha_action
             a = next_action(dpw.next_action, dpw.mdp, s, snode)
-            Base.@lock tree.state_action_nodes_lock begin
-                insert_action_node!(tree, snode, a,
-                                    init_N(sol.init_N, dpw.mdp, s, a),
-                                    init_Q(sol.init_Q, dpw.mdp, s, a))
-            end
+            insert_action_node!(tree, snode, a,
+                                init_N(sol.init_N, dpw.mdp, s, a),
+                                init_Q(sol.init_Q, dpw.mdp, s, a))
         end
     elseif n_children(snode) == 0
-        Base.@lock tree.state_action_nodes_lock begin
-            for a in support(actions(dpw.mdp, s))
-                insert_action_node!(tree, snode, a,
-                                    init_N(sol.init_N, dpw.mdp, s, a),
-                                    init_Q(sol.init_Q, dpw.mdp, s, a))
-            end
+        for a in support(actions(dpw.mdp, s))
+            insert_action_node!(tree, snode, a,
+                                init_N(sol.init_N, dpw.mdp, s, a),
+                                init_Q(sol.init_Q, dpw.mdp, s, a))
         end
     end
 
-    sanode, q_logprob = Base.@lock snode.s_lock begin; sample_sanode_UCB(dpw, snode, β, γ, schedule); end
+    sanode, q_logprob = sample_sanode_UCB(dpw, snode, β, γ, schedule)
     a = sanode.a_label
     w_node = compute_weight(q_logprob, a, actions(dpw.mdp, s))
 
@@ -292,9 +288,19 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
     prob_α = []
     prob_p = []
     all_α = []
-    for a_label in children(snode)
-        state_action_key = (snode.s_label, a_label)
-        sanode = tree.state_action_nodes[state_action_key]
+
+    # Instead of creating a copy, we can presumably just compute the no. of children and read only
+    # that many elements of children(snode). But, this is also technically not safe as the vector
+    # can grow in size and be resized around the same time when we access the element.
+    sa_children = Base.@lock snode.s_lock begin; deepcopy(children(snode)) end
+    for a_label in sa_children
+        Base.@lock tree.state_action_nodes_lock begin
+            state_action_key = (snode.s_label, a_label)
+            if !haskey(tree.state_action_nodes, state_action_key)
+                continue
+            end
+            sanode = tree.state_action_nodes[state_action_key]
+        end
         a_n = n(sanode)
         a_q = q(sanode)
         if (ltn <= 0 && a_n == 0) || c == 0.0
@@ -303,7 +309,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
             UCB = a_q + c * sqrt(ltn / a_n)
         end
 
-        vloss = (a_label in snode.a_selected ? virtual_loss : 0.0)
+        vloss = Base.@lock snode.s_lock begin; (a_label in snode.a_selected ? virtual_loss : 0.0) end;
         UCB -= vloss
 
         @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, ltn=$ltn, n=$n)"
@@ -324,7 +330,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
     end
 
     sanode, q_logprob = select_action(all_sanodes, all_UCB, prob_α, cost_α, prob_p, tree.cdf_est.last_i, all_α, β, γ)
-    push!(snode.a_selected, sanode.a_label)
+    Base.@lock snode.s_lock begin; push!(snode.a_selected, sanode.a_label); end
     return sanode, q_logprob
 end
 
