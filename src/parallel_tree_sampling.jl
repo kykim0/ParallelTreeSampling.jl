@@ -235,11 +235,11 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
             end
         end
         Base.@lock sanode.a_lock begin
-            if new_node
+            push!(sanode.transitions, (sp, r))
+            if !(sp in sanode.unique_transitions)
+                push!(sanode.unique_transitions, sp)
                 sanode.n_a_children += 1
             end
-            push!(sanode.transitions, (sp, r))
-            push!(sanode.unique_transitions, sp)
         end
     else
         sp, r = rand(dpw.rng, sanode.transitions)
