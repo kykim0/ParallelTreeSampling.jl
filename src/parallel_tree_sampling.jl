@@ -157,8 +157,10 @@ end
 Adds a sample to the tree.
 """
 function add_sample!(tree::PISTree, cost::Float64, weight::Float64)
-    push!(tree.costs, cost)
-    push!(tree.weights, weight)
+    Base.@lock tree.costs_weights_lock begin
+        push!(tree.costs, cost)
+        push!(tree.weights, weight)
+    end
 end
 
 
@@ -185,15 +187,11 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     end
 
     if isterminal(dpw.mdp, s)
-        Base.@lock tree.costs_weights_lock begin
-            add_sample!(tree, cost, weight)
-        end
+        add_sample!(tree, cost, weight)
         return cost, weight
     elseif d == 0
         out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight)
-        Base.@lock tree.costs_weights_lock begin
-            add_sample!(tree, out_cost, out_weight)
-        end
+        add_sample!(tree, out_cost, out_weight)
         return out_cost, out_weight
     end
 
@@ -246,9 +244,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     new_cost = update_cost(cost, r, dpw.mdp.reduction)
     if new_node
         out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost, new_weight)
-        Base.@lock tree.costs_weights_lock begin
-            add_sample!(tree, out_cost, out_weight)
-        end
+        add_sample!(tree, out_cost, out_weight)
         q = discount(dpw.mdp) * out_cost
     else
         out_cost, out_weight = simulate(

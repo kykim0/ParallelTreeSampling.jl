@@ -2,6 +2,8 @@ using POMDPs, POMDPGym, POMDPSimulators, POMDPPolicies, Distributions
 using Crux, Flux, BSON, StaticArrays, Random
 using FileIO
 using Plots
+using PyPlot
+
 using ParallelTreeSampling
 
 include("utils.jl")
@@ -23,7 +25,7 @@ mdp = GridWorldMDP(costs=randcosts, cost_penalty=0.1, tprob=tprob)
 
 atable = BSON.load("demo/policies/gridworld_policy_table.bson")[:atable]
 
-# Define the adversarial mdp
+# Define the adversarial mdp.
 adv_rewards = deepcopy(randcosts)
 # adv_rewards = deepcopy(zerocosts)
 for (k,v) in mdp.g.rewards
@@ -89,9 +91,7 @@ fixed_s = rand(initialstate(amdp))
 N = 100_000
 base_N = 10_000_000
 c = 0.0
-α = 0.001
-β = 0.1
-γ = 0.3
+α = 0.001; β = 0.1; γ = 0.3;
 vloss = 0.0
 is_baseline = false
 
@@ -102,9 +102,11 @@ tree_mdp = create_tree_amdp(amdp, disturbance; reduction="sum")
 alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
 
-function baseline()
+function baseline(trial=0)
     baseline_out = run_baseline(amdp, fixed_s, disturbance; N=base_N)
-    save(joinpath(path, "gridworld_baseline_$(N).jld2"),
+    filename = string("gridworld_baseline_$(base_N)",
+                      (trial > 0 ? string("_", trial) : "") ,".jld2")
+    save(joinpath(path, filename),
          Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
 
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
@@ -117,11 +119,15 @@ function baseline()
 end
 
 
-function mcts()
-    mcts_out, planner = run_mcts(tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+function mcts(trial=0)
+    mcts_out, planner = run_mcts(
+        tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
     mcts_info = mcts_out[4]
-    save(joinpath(path, "gridworld_mcts_$(N).jld2"),
-         Dict("risks:" => mcts_out[1], "states:" => mcts_out[2], "IS_weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
+    filename = string("gridworld_mcts_$(N)",
+                      (trial > 0 ? string("_", trial) : "") ,".jld2")
+    save(joinpath(path, filename),
+         Dict("risks:" => mcts_out[1], "states:" => mcts_out[2],
+              "weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
     search_t = round(mcts_info[:search_time_s]; digits=3)
 
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
@@ -136,13 +142,13 @@ end
 
 metrics = []
 times = []
-num_iter = 3
-for idx in 1:num_iter
-    Random.seed!(idx-1)
+num_trials = 5
+for trial in 1:num_trials
+    Random.seed!(trial)
     if is_baseline
-        push!(metrics, baseline())
+        push!(metrics, baseline(trial))
     else
-        metric_d, search_t = mcts()
+        metric_d, search_t = mcts(trial)
         push!(metrics, metric_d)
         push!(times, search_t)
     end

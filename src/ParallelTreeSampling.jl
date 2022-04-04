@@ -20,4 +20,7 @@ include("parallel_tree_sampling.jl")
 
 include("visualization.jl")
 
+export plot_estimates, plot_histogram
+include("plots.jl")
+
 end
