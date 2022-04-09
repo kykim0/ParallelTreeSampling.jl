@@ -7,11 +7,10 @@ include("utils.jl")
 
 
 # Parameters to be set for plotting.
-# mc_data = ["data/gridworld_baseline_10000000.jld2"]
-mc_data = []
+mc_data = ["data/gridworld_baseline_10000000_$(trial).jld2" for trial in 1:5]
 is_data = ["data/gridworld_mcts_100000_$(trial).jld2" for trial in 1:5]
-delta_n = 1000
-plot_hist = true; plot_est = false;
+delta_n_mc = 100_000; delta_n_is = 10_000;
+plot_hist = false; plot_est = true;
 
 # Constants to be updated as needed.
 samples_key = "risks:"; weights_key = "weights:";
@@ -30,7 +29,7 @@ n_is_samples = [load_jld2(is_datum) for is_datum in is_data]
 # Returns a lambda for computing metrics used for plotting.
 #
 # Valid metric types include :mean, :var, :cvar, :worst.
-function estimate_fn(metric_type, alpha, with_weights)
+function estimate_fn(metric_type, alpha, with_weights=false)
     if with_weights
         fn = function(samples, weights)
             metrics = eval_metrics(samples; weights=exp.(weights), alpha=alpha)
@@ -51,23 +50,23 @@ if plot_est
     figure(figsize=(9.0, 6.0))
     if !isempty(n_mc_samples)
         plot_estimates(n_mc_samples, estimate_fn(:var, 1e-3),
-                       delta_n, "MC-VaR-1e-3")
+                       delta_n_mc, "MC-VaR-1e-3")
         plot_estimates(n_mc_samples, estimate_fn(:cvar, 1e-3),
-                       delta_n, "MC-CVaR-1e-3")
+                       delta_n_mc, "MC-CVaR-1e-3")
         plot_estimates(n_mc_samples, estimate_fn(:var, 1e-4),
-                       delta_n, "MC-VaR-1e-4")
+                       delta_n_mc, "MC-VaR-1e-4")
         plot_estimates(n_mc_samples, estimate_fn(:cvar, 1e-4),
-                       delta_n, "MC-CVaR-1e-4")
+                       delta_n_mc, "MC-CVaR-1e-4")
     end
     if !isempty(n_is_samples)
         plot_estimates(n_is_samples, estimate_fn(:var, 1e-3, true),
-                       delta_n, "IS-VaR-1e-3")
+                       delta_n_is, "IS-VaR-1e-3")
         plot_estimates(n_is_samples, estimate_fn(:cvar, 1e-3, true),
-                       delta_n, "IS-CVaR-1e-3")
+                       delta_n_is, "IS-CVaR-1e-3")
         plot_estimates(n_is_samples, estimate_fn(:var, 1e-4, true),
-                       delta_n, "IS-VaR-1e-4")
+                       delta_n_is, "IS-VaR-1e-4")
         plot_estimates(n_is_samples, estimate_fn(:cvar, 1e-4, true),
-                       delta_n, "IS-CVaR-1e-4")
+                       delta_n_is, "IS-CVaR-1e-4")
     end
     xlabel("no. samples"); ylabel("estimates"); legend();
 end
