@@ -28,10 +28,11 @@ function run_mcts(tree_mdp, fixed_s; N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, �
     solver = PISSolver(; depth=100,
                        exploration_constant=c,
                        n_iterations=N,
-                       enable_state_pw=false,   # Required.
+                       enable_action_pw=false,  # Needed for discrete cases.
+                       k_state=Inf,             # Needed for discrete cases (to always transition).
+                       virtual_loss=vloss,
                        show_progress=true,
                        tree_in_info=true,
-                       virtual_loss=vloss,
                        α=α);
     planner = solve(solver, tree_mdp);
     a, info = action_info(planner, TreeState(fixed_s); tree_in_info=true, β=β, γ=γ)
