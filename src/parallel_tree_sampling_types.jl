@@ -86,9 +86,9 @@ mutable struct PISSolver
     max_time::Float64
     k_action::Float64
     alpha_action::Float64
-    virtual_loss::Float64
     k_state::Float64
     alpha_state::Float64
+    virtual_loss::Float64
     keep_tree::Bool
     enable_action_pw::Bool
     enable_state_pw::Bool
