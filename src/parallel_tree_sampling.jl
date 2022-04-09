@@ -10,63 +10,6 @@ end
 
 
 """
-Utility function for numerically stable softmax.
-"""
-_exp(x) = exp.(x .- maximum(x))
-_exp(x, θ::AbstractFloat) = exp.((x .- maximum(x)) * θ)
-_sftmax(e, d::Integer) = (e ./ sum(e, dims = d))
-
-function softmax(X, dim::Integer)
-    _sftmax(_exp(X), dim)
-end
-
-function softmax(X, dim::Integer, θ::Float64)
-    _sftmax(_exp(X, θ), dim)
-end
-
-softmax(X) = softmax(X, 1)
-
-
-"""
-Calculates next action.
-"""
-function select_action(nodes, values, prob_α, cost_α, prob_p, n, α, β, γ)
-    prob = adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
-    sanode_idx = sample(1:length(nodes), Weights(prob))
-    sanode = nodes[sanode_idx]
-    q_logprob = log(prob[sanode_idx])
-    return sanode, q_logprob
-end
-
-
-function adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
-    cvar_strategy = [(cost_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(cost_α...)) / 20 .+ 1e-5
-    cdf_strategy = [(prob_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(prob_α...)) * max(prob_p...) / 20 .+ 1e-5
-
-    # Normalize to unity
-    cvar_strategy /= sum(cvar_strategy)
-    cdf_strategy /= sum(cdf_strategy)
-
-    # Mixture weighting
-    prob = β * prob_p .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
-    return prob
-end
-
-
-"""
-Calculates importance sampling weights.
-"""
-function compute_weight(q_logprob, a, distribution)
-    if distribution == nothing
-        w = -q_logprob
-    else
-        w = logpdf(distribution, a) - q_logprob
-    end
-    return w
-end
-
-
-"""
 Constructs a PISTree and choose an action.
 """
 POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
@@ -218,7 +161,8 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     # State progressive widening.
     spnode = nothing
     new_node = false
-    if (n_a_children(sanode) <= sol.k_state * n(sanode)^sol.alpha_state) || n_a_children(sanode) == 0
+    if ((sol.enable_state_pw && n_a_children(sanode) <= sol.k_state * n(sanode)^sol.alpha_state) ||
+        n_a_children(sanode) == 0)
         sp, r = @gen(:sp, :r)(dpw.mdp, s, a, dpw.rng)
         Base.@lock tree.state_nodes_lock begin
             if haskey(tree.state_nodes, sp) 
@@ -268,6 +212,47 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
 end
 
 
+"""
+Calculates importance sampling weights i.e., p/q.
+"""
+function compute_weight(q_logprob, a, distribution)
+    if distribution == nothing
+        w = -q_logprob
+    else
+        w = logpdf(distribution, a) - q_logprob
+    end
+    return w
+end
+
+
+"""
+Calculates next action.
+"""
+function select_action(nodes, values, prob_α, cost_α, prob_p, n, α, β, γ)
+    prob = adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
+    sanode_idx = sample(1:length(nodes), Weights(prob))
+    sanode = nodes[sanode_idx]
+    q_logprob = log(prob[sanode_idx])
+    return sanode, q_logprob
+end
+
+
+function adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
+    cvar_strategy = [(cost_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(cost_α...)) / 20 .+ 1e-5                                                       
+    cdf_strategy = [(prob_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(prob_α...)) * max(prob_p...) / 20 .+ 1e-5 
+    # cvar_strategy = cost_α .* prob_p .+ (maximum(cost_α) / 20) .+ 1e-5
+    # cdf_strategy = prob_α .* prob_p .+ (maximum(prob_α) * maximum(prob_p) / 20) .+ 1e-5
+
+    # Normalize to unity.
+    cvar_strategy /= sum(cvar_strategy)
+    cdf_strategy /= sum(cdf_strategy)
+
+    # Mixture weighting.
+    prob = β * prob_p .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
+    return prob
+end
+
+
 function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
                            β::Float64, γ::Float64, schedule::Float64)
     mdp = dpw.mdp
@@ -305,11 +290,12 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
             UCB = a_q + c * sqrt(ltn / a_n)
         end
 
+        # If applicable, apply virtual loss to the score.
         vloss = Base.@lock snode.s_lock begin; (a_label in snode.a_selected ? virtual_loss : 0.0) end;
         UCB -= vloss
 
-        @assert !isnan(UCB) "UCB was NaN (q=$q, c=$c, ltn=$ltn, n=$n)"
-        @assert !isequal(UCB, -Inf)
+        @assert !isnan(UCB) "UCB was NaN (q=$a_q, c=$c, ltn=$ltn, n=$a_n)"
+        @assert !isequal(UCB, -Inf) "UCB was -Inf (q=$a_q, c=$c, ltn=$ltn, n=$a_n, vloos_top=$virtual_loss, k_state=$(sol.k_state))"
         
         push!(all_UCB, UCB)
         push!(all_sanodes, sanode)
