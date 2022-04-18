@@ -23,4 +23,7 @@ include("visualization.jl")
 export plot_estimates, plot_histogram
 include("plots.jl")
 
+export GenericDiscreteNonParametric
+include("distributions.jl")
+
 end
