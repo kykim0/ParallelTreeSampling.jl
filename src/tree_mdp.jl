@@ -17,7 +17,6 @@ mutable struct TreeMDP <: MDP{TreeState, Any}
     rmdp::Any
     discount_factor::Float64
     distribution::Any
-    reduction::String
 end
 
 
@@ -43,19 +42,4 @@ POMDPs.discount(mdp::TreeMDP) = mdp.discount_factor
 
 function POMDPs.actions(mdp::TreeMDP, s::TreeState)
     return mdp.distribution(mdp.rmdp, s.mdp_state)
-end
-
-
-function rollout(mdp::TreeMDP, s::TreeState, d::Int64,
-                 cost::Float64, weight::Float64)
-    if d == 0 || isterminal(mdp, s)
-        return cost, weight
-    else
-        p_action = POMDPs.actions(mdp, s)
-        action = rand(p_action)
-
-        (sp, r) = @gen(:sp, :r)(mdp, s, action, Random.GLOBAL_RNG)
-        new_cost = update_cost(cost, r, mdp.reduction)
-        return rollout(mdp, sp, d - 1, cost, weight)
-    end
 end

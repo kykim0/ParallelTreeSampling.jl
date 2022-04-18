@@ -36,10 +36,6 @@ Fields:
     enable_state_pw::Bool
         If true, enable progressive widening on the state space; if false just use the single next state (for deterministic problems).
         default: true
-    check_repeat_state::Bool
-    check_repeat_action::Bool
-        When constructing the tree, check whether a state or action has been seen before (there is a computational cost to maintaining the dictionaries necessary for this)
-        default: true
     tree_in_info::Bool
         If true, return the tree in the info dict when action_info is called. False by default because it can use a lot of memory if histories are being saved.
         default: false
@@ -78,7 +74,7 @@ Fields:
         Show progress bar during simulation.
         default: false
 """
-# TODO(kykim): Clean up some of the settings.
+
 mutable struct PISSolver
     depth::Int
     exploration_constant::Float64
@@ -89,11 +85,10 @@ mutable struct PISSolver
     k_state::Float64
     alpha_state::Float64
     virtual_loss::Float64
+    weight_reduction::String
     keep_tree::Bool
     enable_action_pw::Bool
     enable_state_pw::Bool
-    check_repeat_state::Bool
-    check_repeat_action::Bool
     tree_in_info::Bool
     rng::AbstractRNG
     init_Q::Any
@@ -103,6 +98,7 @@ mutable struct PISSolver
     reset_callback::Function
     show_progress::Bool
     timer::Function
+    # TODO(kykim): Either put all params in the solver or make them method args.
     α::Float64
 end
 
@@ -123,24 +119,25 @@ function PISSolver(;depth::Int=10,
                    k_state::Float64=10.0,
                    alpha_state::Float64=0.5,
                    virtual_loss::Float64=0.0,
+                   weight_reduction::String="sum",
                    keep_tree::Bool=false,
                    enable_action_pw::Bool=true,
                    enable_state_pw::Bool=true,
-                   check_repeat_state::Bool=true,  # TODO(kykim): Are the two needed?
-                   check_repeat_action::Bool=true,
                    tree_in_info::Bool=false,
                    rng::AbstractRNG=Random.GLOBAL_RNG,
                    init_Q::Any=0.0,
                    init_N::Any=1,
                    next_action::Any=UniformActionGenerator(rng),
                    default_action::Any=nothing,
-                   reset_callback::Function=(mdp, s) -> false,
+                   reset_callback::Function=(mdp, s)->false,
                    show_progress::Bool=false,
-                   timer=() -> 1e-9*time_ns(),
+                   timer=()->1e-9*time_ns(),
                    α::Float64=0.1)
-    PISSolver(depth, exploration_constant, n_iterations, max_time, k_action, alpha_action, k_state, alpha_state, virtual_loss,
-              keep_tree, enable_action_pw, enable_state_pw, check_repeat_state, check_repeat_action, tree_in_info, rng,
-              init_Q, init_N, next_action, default_action, reset_callback, show_progress, timer, α)
+    PISSolver(depth, exploration_constant, n_iterations, max_time, k_action,
+              alpha_action, k_state, alpha_state, virtual_loss,
+              weight_reduction, keep_tree, enable_action_pw, enable_state_pw,
+              tree_in_info, rng, init_Q, init_N, next_action, default_action,
+              reset_callback, show_progress, timer, α)
 end
 
 

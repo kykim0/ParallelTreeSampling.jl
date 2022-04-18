@@ -14,9 +14,23 @@ Constructs a PISTree and choose an action.
 """
 POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 
-function estimate_value(mdp::Union{POMDP,MDP}, state::TreeState,
-                        depth::Int, cost::Float64, weight::Float64)
-    return rollout(mdp, state, depth, cost, weight)
+function rollout(mdp::TreeMDP, s::TreeState, d::Int64,
+                 cost::Float64, weight::Float64, w_reduction::String)
+    if d == 0 || isterminal(mdp, s)
+        return cost, weight
+    else
+        p_action = POMDPs.actions(mdp, s)
+        action = rand(p_action)
+
+        (sp, r) = @gen(:sp, :r)(mdp, s, action, Random.GLOBAL_RNG)
+        new_cost = update_cost(cost, r, w_reduction)
+        return rollout(mdp, sp, d - 1, cost, weight)
+    end
+end
+
+function estimate_value(mdp::Union{POMDP,MDP}, state::TreeState, depth::Int,
+                        cost::Float64, weight::Float64, w_reduction::String)
+    return rollout(mdp, state, depth, cost, weight, w_reduction)
 end
 
 function next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s, snode::PISStateNode)
@@ -133,7 +147,8 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         add_sample!(tree, cost, weight)
         return cost, weight
     elseif d == 0
-        out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight)
+        out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight,
+                                              sol.weight_reduction)
         add_sample!(tree, out_cost, out_weight)
         return out_cost, out_weight
     end
@@ -185,9 +200,10 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     end
 
     new_weight = weight + w_node
-    new_cost = update_cost(cost, r, dpw.mdp.reduction)
+    new_cost = update_cost(cost, r, sol.weight_reduction)
     if new_node
-        out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost, new_weight)
+        out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost,
+                                              new_weight, sol.weight_reduction)
         add_sample!(tree, out_cost, out_weight)
         q = discount(dpw.mdp) * out_cost
     else
