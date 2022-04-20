@@ -38,9 +38,9 @@ amdp = GridWorldMDP(rewards=adv_rewards, tprob=1., discount=1., terminate_from=m
 # Define action probability for the adv_mdp.
 action_probability(mdp, s, a) = (a == atable[s][1]) ? tprob : ((1. - tprob) / (length(actions(mdp)) - 1.))
 
-function disturbance(m::typeof(amdp), s)
-    xs = POMDPs.actions(m, s)
-    ps = [action_probability(m, s, x) for x in xs]
+function distribution(mdp::Union{POMDP,MDP}, s)
+    xs = POMDPs.actions(mdp, s)
+    ps = [action_probability(mdp, s, x) for x in xs]
     ps ./= sum(ps)
     px = GenericDiscreteNonParametric(xs, ps)
     return px
@@ -57,13 +57,11 @@ is_baseline = false
 
 path = "data"
 
-tree_mdp = create_tree_amdp(amdp, disturbance; reduction="sum")
-
 alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
 
 function baseline(trial=0)
-    baseline_out = run_baseline(amdp, fixed_s, disturbance; N=base_N)
+    baseline_out = run_baseline(amdp, fixed_s, distribution; N=base_N)
     filename = string("gridworld_baseline_$(base_N)",
                       (trial > 0 ? string("_", trial) : "") ,".jld2")
     save(joinpath(path, filename),
@@ -81,7 +79,7 @@ end
 
 function mcts(trial=0)
     mcts_out, planner = run_mcts(
-        tree_mdp, fixed_s; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+        amdp, fixed_s, distribution; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
     mcts_info = mcts_out[4]
     filename = string("gridworld_mcts_$(N)",
                       (trial > 0 ? string("_", trial) : "") ,".jld2")
