@@ -169,3 +169,5 @@ function PISPlanner(solver::PISSolver, mdp::P) where P<:Union{POMDP,MDP}
 end
 
 Random.seed!(p::PISPlanner, seed) = Random.seed!(p.rng, seed)
+
+POMDPs.solve(solver::PISSolver, mdp::Union{POMDP,MDP}) = PISPlanner(solver, mdp)

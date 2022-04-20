@@ -16,7 +16,8 @@ include("tree.jl")
 export PISSolver, PISPlanner
 include("solver.jl")
 
-include("parallel_tree_sampling.jl")
+include("rollout.jl")
+include("search.jl")
 
 export GenericDiscreteNonParametric
 include("distributions.jl")
