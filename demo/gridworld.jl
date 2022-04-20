@@ -71,7 +71,7 @@ function baseline(trial=0)
     for alpha in alpha_list
         m = eval_metrics(baseline_out[1]; alpha)
         d[alpha][:N] = length(baseline_out[1]); d[alpha][:mean] = m.mean;
-        qd[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
+        d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
     end
     return d
 end
