@@ -85,6 +85,7 @@ mutable struct PISSolver
     k_state::Float64
     alpha_state::Float64
     virtual_loss::Float64
+    nominal_distrib_fn::Function
     weight_reduction::String
     keep_tree::Bool
     enable_action_pw::Bool
@@ -119,6 +120,7 @@ function PISSolver(;depth::Int=10,
                    k_state::Float64=10.0,
                    alpha_state::Float64=0.5,
                    virtual_loss::Float64=0.0,
+                   nominal_distrib_fn=(mdp, s)->Normal(0, 1),
                    weight_reduction::String="sum",
                    keep_tree::Bool=false,
                    enable_action_pw::Bool=true,
@@ -135,9 +137,9 @@ function PISSolver(;depth::Int=10,
                    α::Float64=0.1)
     PISSolver(depth, exploration_constant, n_iterations, max_time, k_action,
               alpha_action, k_state, alpha_state, virtual_loss,
-              weight_reduction, keep_tree, enable_action_pw, enable_state_pw,
-              tree_in_info, rng, init_Q, init_N, next_action, default_action,
-              reset_callback, show_progress, timer, α)
+              nominal_distrib_fn, weight_reduction, keep_tree, enable_action_pw,
+              enable_state_pw, tree_in_info, rng, init_Q, init_N, next_action,
+              default_action, reset_callback, show_progress, timer, α)
 end
 
 

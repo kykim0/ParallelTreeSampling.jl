@@ -14,23 +14,27 @@ Constructs a PISTree and choose an action.
 """
 POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 
-function rollout(mdp::TreeMDP, s::TreeState, d::Int64,
-                 cost::Float64, weight::Float64, w_reduction::String)
+function rollout(mdp::Union{POMDP,MDP}, s, d::Int64,
+                 cost::Float64, weight::Float64, w_reduction::String,
+                 action_distrib_fn::Function)
     if d == 0 || isterminal(mdp, s)
         return cost, weight
     else
-        p_action = POMDPs.actions(mdp, s)
+        p_action = action_distrib_fn(mdp, s)
         action = rand(p_action)
 
         (sp, r) = @gen(:sp, :r)(mdp, s, action, Random.GLOBAL_RNG)
         new_cost = update_cost(cost, r, w_reduction)
-        return rollout(mdp, sp, d - 1, cost, weight)
+        return rollout(mdp, sp, d - 1, cost, weight, w_reduction,
+                       action_distrib_fn)
     end
 end
 
-function estimate_value(mdp::Union{POMDP,MDP}, state::TreeState, depth::Int,
-                        cost::Float64, weight::Float64, w_reduction::String)
-    return rollout(mdp, state, depth, cost, weight, w_reduction)
+function estimate_value(mdp::Union{POMDP,MDP}, state, depth::Int,
+                        cost::Float64, weight::Float64, w_reduction::String,
+                        action_distrib_fn::Function)
+    return rollout(mdp, state, depth, cost, weight, w_reduction,
+                   action_distrib_fn)
 end
 
 function next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s, snode::PISStateNode)
@@ -129,9 +133,10 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
                   β::Float64=0.0, γ::Float64=1.0, schedule::Float64=0.1,
                   timeout_s::Float64=0.0)
     sol = dpw.solver
-    timer = sol.timer
     tree = dpw.tree
     s = snode.s_label
+    action_distrib_fn = sol.nominal_distrib_fn
+    action_distrib = action_distrib_fn(dpw.mdp, s)
 
     Base.@lock tree.costs_weights_lock begin
         n_samples = length(tree.costs)
@@ -148,7 +153,8 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         return cost, weight
     elseif d == 0
         out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight,
-                                              sol.weight_reduction)
+                                              sol.weight_reduction,
+                                              action_distrib_fn)
         add_sample!(tree, out_cost, out_weight)
         return out_cost, out_weight
     end
@@ -169,9 +175,9 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         end
     end
 
-    sanode, q_logprob = sample_sanode_UCB(dpw, snode, β, γ, schedule)
+    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, β, γ, schedule)
     a = sanode.a_label
-    w_node = compute_weight(q_logprob, a, actions(dpw.mdp, s))
+    w_node = compute_weight(q_logprob, a, action_distrib)
 
     # State progressive widening.
     spnode = nothing
@@ -203,7 +209,8 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     new_cost = update_cost(cost, r, sol.weight_reduction)
     if new_node
         out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost,
-                                              new_weight, sol.weight_reduction)
+                                              new_weight, sol.weight_reduction,
+                                              action_distrib_fn)
         add_sample!(tree, out_cost, out_weight)
         q = discount(dpw.mdp) * out_cost
     else
@@ -269,7 +276,7 @@ function adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
 end
 
 
-function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
+function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
                            β::Float64, γ::Float64, schedule::Float64)
     mdp = dpw.mdp
     tree = dpw.tree
@@ -323,7 +330,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode,
         c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.conditional_cdf_est, est_quantile)
         push!(cost_α, c_tail)
         push!(prob_α, 1.0 - c_cdf)
-        push!(prob_p, pdf(actions(mdp, snode.s_label), a_label))
+        push!(prob_p, pdf(action_distrib, a_label))
         push!(all_α, a_α)
     end
 
