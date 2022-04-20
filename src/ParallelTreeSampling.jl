@@ -11,16 +11,20 @@ using StatsBase
 
 include("common_utils.jl")
 
+include("tree.jl")
+
 export PISSolver, PISPlanner
-include("parallel_tree_sampling_types.jl")
-include("parallel_tree_sampling.jl")
+include("solver.jl")
+
+include("rollout.jl")
+include("search.jl")
+
+export GenericDiscreteNonParametric
+include("distributions.jl")
 
 include("visualization.jl")
 
 export plot_estimates, plot_histogram
 include("plots.jl")
-
-export GenericDiscreteNonParametric
-include("distributions.jl")
 
 end
