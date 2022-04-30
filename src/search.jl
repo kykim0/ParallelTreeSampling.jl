@@ -193,7 +193,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
             sanode.n += 1
             sanode.q += (q - sanode.q) / sanode.n
             ImportanceWeightedRiskMetrics.update!(
-                sanode.conditional_cdf_est, q, exp(out_weight))
+                sanode.c_cdf_est, q, exp(out_weight))
         end
     end
 
@@ -263,7 +263,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
     sa_children = Base.@lock snode.s_lock begin; deepcopy(children(snode)) end
     for a_label in sa_children
         Base.@lock tree.state_action_nodes_lock begin
-            state_action_key = (snode.s_label, a_label)
+            state_action_key = sanode_key(snode.s_label, a_label)
             if !haskey(tree.state_action_nodes, state_action_key)
                 continue
             end
@@ -290,8 +290,8 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         w_annealed = 1.0 / (1.0 + schedule * a_n)
         a_α = w_annealed + (1 - w_annealed) * α
         est_quantile = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, α)
-        c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.conditional_cdf_est, est_quantile)
-        c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.conditional_cdf_est, est_quantile)
+        c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.c_cdf_est, est_quantile)
+        c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.c_cdf_est, est_quantile)
         push!(cost_α, c_tail)
         push!(prob_α, 1.0 - c_cdf)
         push!(prob_p, pdf(action_distrib, a_label))
@@ -313,7 +313,7 @@ function best_sanode(tree::PISTree, snode::PISStateNode)
     best_Q = -Inf
     best_sa = nothing
     for a_label in children(snode)
-        state_action_key = (snode.s_label, a_label)
+        state_action_key = sanode_key(snode.s_label, a_label)
         sanode = tree.state_action_nodes[state_action_key]
         if q(sanode) > best_Q
             best_Q = q(sanode)

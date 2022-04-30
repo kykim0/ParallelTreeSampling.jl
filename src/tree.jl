@@ -7,7 +7,7 @@ mutable struct PISActionNode{S,A}
     transitions::Vector{Tuple{S,Float64}}
     unique_transitions::Set{S}
     n_a_children::Int
-    conditional_cdf_est::RunningCDFEstimator
+    c_cdf_est::RunningCDFEstimator  # Conditional CDF.
     a_lock::ReentrantLock
 end
 PISActionNode(id::Int, a::A, n::Int, q::Float64, transitions::Vector{Tuple{S,Float64}}) where {S,A} =
@@ -87,11 +87,16 @@ function insert_state_node!(tree::PISTree{S,A}, s::S) where {S,A}
 end
 
 
+function sanode_key(s_label::S, a_label::A) where {S,A}
+    return tuple(s_label, a_label)
+end
+
+
 function insert_action_node!(tree::PISTree{S,A}, snode::PISStateNode{S,A},
                              a::Union{S,A}, n0::Int, q0::Float64) where {S,A}
     sanode = nothing
     Base.@lock tree.state_action_nodes_lock begin
-        state_action_key = (snode.s_label, a)
+        state_action_key = sanode_key(snode.s_label, a)
         haskey(tree.state_action_nodes, state_action_key) && return tree.state_action_nodes[state_action_key]
         id = Threads.atomic_add!(tree._a_id_counter, 1)
         sanode = PISActionNode(id, a, n0, q0, Vector{Tuple{S,Float64}}())
