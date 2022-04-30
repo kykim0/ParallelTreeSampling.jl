@@ -15,7 +15,7 @@ POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 Constructs a PISTree and choose the best action.
 """
 function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.0, γ=1.0, schedule=0.1)
-    local a::actiontype(p.mdp)
+    local a::Any  # actiontype(p.mdp)
     info = Dict{Symbol, Any}()
     try
         if isterminal(p.mdp, s)
@@ -24,7 +24,9 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.
 
         tree = p.tree
         if !p.solver.keep_tree || tree == nothing
-            tree = PISTree{statetype(p.mdp),actiontype(p.mdp)}()
+            # TODO(kykim): Temporary hack to get around the RMDP case.
+            # Should ideally be actiontype(p.mdp).
+            tree = PISTree{statetype(p.mdp),Any}()
             p.tree = tree
         end
         snode = insert_state_node!(tree, s)
@@ -35,7 +37,9 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.
         n_iterations = p.solver.n_iterations
         p.solver.show_progress ? progress = Progress(n_iterations) : nothing
 
-        sim_channel = Channel{Task}(min(1000, n_iterations)) do channel
+        sim_channel = Channel{Task}(min(10_000, n_iterations)) do channel
+            # TODO(kykim): Try pulling out the add_sample! and update! calls out
+            # from the simulate() method.
             for n in 1:n_iterations
                 put!(channel, Threads.@spawn simulate(p, snode, p.solver.depth, 0.0, 0.0,
                                                       β, γ, schedule, timeout_s))
@@ -85,6 +89,7 @@ function add_sample!(tree::PISTree, cost::Float64, weight::Float64)
         push!(tree.costs, cost)
         push!(tree.weights, weight)
     end
+    return cost, weight
 end
 
 
@@ -112,14 +117,12 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     end
 
     if isterminal(dpw.mdp, s)
-        add_sample!(tree, cost, weight)
-        return cost, weight
+        return add_sample!(tree, cost, weight)
     elseif d == 0
         out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight,
                                               sol.weight_reduction,
                                               action_distrib_fn)
-        add_sample!(tree, out_cost, out_weight)
-        return out_cost, out_weight
+        return add_sample!(tree, out_cost, out_weight)
     end
 
     # Action progressive widening.
@@ -182,7 +185,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         q = discount(dpw.mdp) * out_cost
     end
 
-    # Backpropgate and update node values.
+    # Backpropagate and update node values.
     Base.@lock sanode.a_lock begin
         Base.@lock snode.s_lock begin
             snode.total_n += 1
@@ -215,27 +218,25 @@ end
 Calculates next action.
 """
 function select_action(nodes, values, prob_α, cost_α, prob_p, n, α, β, γ)
-    prob = adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
-    sanode_idx = sample(1:length(nodes), Weights(prob))
+    probs = adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
+    sanode_idx = sample(1:length(nodes), Weights(probs))
     sanode = nodes[sanode_idx]
-    q_logprob = log(prob[sanode_idx])
+    q_logprob = log(probs[sanode_idx])
     return sanode, q_logprob
 end
 
 
 function adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
-    cvar_strategy = [(cost_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(cost_α...)) / 20 .+ 1e-5                                                       
-    cdf_strategy = [(prob_α[i] * prob_p[i]) for i=1:length(values)] .+ (max(prob_α...)) * max(prob_p...) / 20 .+ 1e-5 
-    # cvar_strategy = cost_α .* prob_p .+ (maximum(cost_α) / 20) .+ 1e-5
-    # cdf_strategy = prob_α .* prob_p .+ (maximum(prob_α) * maximum(prob_p) / 20) .+ 1e-5
+    cvar_strategy = cost_α .* prob_p .+ (maximum(cost_α) / 20) .+ eps()
+    cdf_strategy = prob_α .* prob_p .+ (maximum(prob_α) * maximum(prob_p) / 20) .+ eps()
 
     # Normalize to unity.
     cvar_strategy /= sum(cvar_strategy)
     cdf_strategy /= sum(cdf_strategy)
 
     # Mixture weighting.
-    prob = β * prob_p .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
-    return prob
+    probs = β * prob_p .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
+    return probs
 end
 
 
@@ -281,7 +282,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         UCB -= vloss
 
         @assert !isnan(UCB) "UCB was NaN (q=$a_q, c=$c, ltn=$ltn, n=$a_n)"
-        @assert !isequal(UCB, -Inf) "UCB was -Inf (q=$a_q, c=$c, ltn=$ltn, n=$a_n, vloos_top=$virtual_loss, k_state=$(sol.k_state))"
+        @assert !isequal(UCB, -Inf) "UCB was -Inf (q=$a_q, c=$c, ltn=$ltn, n=$a_n, vloss=$vloss, k_state=$(sol.k_state))"
         
         push!(all_UCB, UCB)
         push!(all_sanodes, sanode)

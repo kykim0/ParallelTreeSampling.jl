@@ -37,7 +37,7 @@ PISStateNode(id::Int, s::S, total_n::Int, children::Vector{A}) where {S,A} =
 
 
 mutable struct PISTree{S,A}
-    root::Union{Nothing, S}
+    root::Union{Nothing,S}
 
     state_nodes::Dict{S, PISStateNode}
     state_action_nodes::Dict{Tuple{S,A}, PISActionNode}
@@ -54,7 +54,7 @@ mutable struct PISTree{S,A}
     _s_id_counter::Threads.Atomic{Int}
     _a_id_counter::Threads.Atomic{Int}
 
-    function PISTree{S,A}(root::Union{Nothing, S}=nothing) where {S,A} 
+    function PISTree{S,A}(root::Union{Nothing,S}=nothing) where {S,A}
         return new(root,
                    Dict{S, PISStateNode}(),
                    Dict{Tuple{S,A}, PISActionNode}(),
@@ -87,7 +87,8 @@ function insert_state_node!(tree::PISTree{S,A}, s::S) where {S,A}
 end
 
 
-function insert_action_node!(tree::PISTree{S,A}, snode::PISStateNode{S,A}, a::A, n0::Int, q0::Float64) where {S,A}
+function insert_action_node!(tree::PISTree{S,A}, snode::PISStateNode{S,A},
+                             a::Union{S,A}, n0::Int, q0::Float64) where {S,A}
     sanode = nothing
     Base.@lock tree.state_action_nodes_lock begin
         state_action_key = (snode.s_label, a)

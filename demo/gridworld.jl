@@ -70,8 +70,9 @@ function baseline(trial=0)
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
         m = eval_metrics(baseline_out[1]; alpha)
-        d[alpha][:N] = length(baseline_out[1]); d[alpha][:mean] = m.mean;
-        d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
+        d[alpha][:N] = length(baseline_out[1]); d[alpha][:mean] = round(m.mean, digits=3);
+        d[alpha][:var] = round(m.var, digits=3); d[alpha][:cvar] = round(m.cvar, digits=3);
+        d[alpha][:worst] = round(m.worst, digits=3);
     end
     return d
 end
@@ -91,8 +92,9 @@ function mcts(trial=0)
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
         m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
-        d[alpha][:N] = length(mcts_out[1]); d[alpha][:mean] = m.mean;
-        d[alpha][:var] = m.var; d[alpha][:cvar] = m.cvar; d[alpha][:worst] = m.worst;
+        d[alpha][:N] = length(mcts_out[1]); d[alpha][:mean] = round(m.mean, digits=3);
+        d[alpha][:var] = round(m.var, digits=3); d[alpha][:cvar] = round(m.cvar, digits=3);
+        d[alpha][:worst] = round(m.worst, digits=3);
     end
     return d, search_t
 end
@@ -100,7 +102,7 @@ end
 
 metrics = []
 times = []
-num_trials = 5
+num_trials = 1
 for trial in 1:num_trials
     Random.seed!(trial)
     if is_baseline

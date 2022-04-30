@@ -1,15 +1,18 @@
 using Distributions
+using Random
+
 using ImportanceWeightedRiskMetrics
-using ParallelTreeSampling
+using POMDPGym
 using POMDPModelTools
 using POMDPPolicies
 using POMDPs
 using POMDPSimulators
-using Random
+
+using ParallelTreeSampling
 
 
 # Runs Monte Carlo baseline.
-function run_baseline(amdp, s, distrib_fn; N=1000)
+function run_baseline(amdp::MDP, s, distrib_fn; N=1000)
     function_policy = (s) -> rand(distrib_fn(amdp, s))
     costs = [sum(collect(simulate(HistoryRecorder(), amdp, function_policy, s)[:r]))
              for _ in 1:N]
@@ -18,19 +21,30 @@ function run_baseline(amdp, s, distrib_fn; N=1000)
 end
 
 
+function run_baseline(rmdp::RMDP, s, px; N=1000)
+    noise_fn = (s) -> rand(px)  # Random noise.
+    function_policy = FunctionPolicy(noise_fn)
+    costs = [sum(collect(simulate(HistoryRecorder(), rmdp, function_policy, s)[:r]))
+             for _ in 1:N]
+    output = (costs, [])
+    return output
+end
+
+
 # Runs MCTS-based sampling.
-function run_mcts(amdp, s, distrib_fn; N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, γ=0.0)
+function run_mcts(mdp::MDP, s, nominal_distrib_fn;
+                  N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, γ=0.0)
     solver = PISSolver(; depth=100,
                        exploration_constant=c,
                        n_iterations=N,
                        enable_action_pw=false,  # Needed for discrete cases.
                        k_state=Inf,             # Needed for discrete cases (to always transition).
                        virtual_loss=vloss,
-                       nominal_distrib_fn=distrib_fn,
+                       nominal_distrib_fn=nominal_distrib_fn,
                        show_progress=true,
                        tree_in_info=true,
                        α=α);
-    planner = solve(solver, amdp);
+    planner = solve(solver, mdp);
     a, info = action_info(planner, s; tree_in_info=true, β=β, γ=γ)
     tree = info[:tree]
     output = (tree.costs, [], tree.weights, info)
