@@ -156,7 +156,9 @@ end
 function PISPlanner(solver::PISSolver, mdp::P) where P<:Union{POMDP,MDP}
     return PISPlanner{P,
                       statetype(P),
-                      actiontype(P),
+                      # TODO(kykim): Temporary hack to get around the RMDP case.
+                      # Should be actiontype(P).
+                      Any,
                       typeof(solver.next_action),
                       typeof(solver.reset_callback),
                       typeof(solver.rng)}(
