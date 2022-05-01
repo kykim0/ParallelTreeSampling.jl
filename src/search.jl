@@ -120,7 +120,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         return add_sample!(tree, cost, weight)
     elseif d == 0
         out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight,
-                                              sol.weight_reduction,
+                                              sol.cost_reduction,
                                               action_distrib_fn)
         return add_sample!(tree, out_cost, out_weight)
     end
@@ -172,10 +172,10 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     end
 
     new_weight = weight + w_node
-    new_cost = update_cost(cost, r, sol.weight_reduction)
+    new_cost = update_cost(cost, r, sol.cost_reduction)
     if new_node
         out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost,
-                                              new_weight, sol.weight_reduction,
+                                              new_weight, sol.cost_reduction,
                                               action_distrib_fn)
         add_sample!(tree, out_cost, out_weight)
         q = discount(dpw.mdp) * out_cost
@@ -202,7 +202,7 @@ end
 
 
 """
-Calculates importance sampling weights i.e., p/q.
+Computes importance weights i.e., p/q.
 """
 function compute_weight(q_logprob, a, distribution)
     if distribution == nothing
@@ -215,47 +215,55 @@ end
 
 
 """
-Calculates next action.
+Returns a sampled action and the corresponding log probability.
 """
-function select_action(nodes, values, prob_α, cost_α, prob_p, n, α, β, γ)
-    probs = adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
-    sanode_idx = sample(1:length(nodes), Weights(probs))
-    sanode = nodes[sanode_idx]
-    q_logprob = log(probs[sanode_idx])
+function select_action(sanodes, action_probs)
+    sanode_idx = sample(1:length(sanodes), Weights(action_probs))
+    sanode = sanodes[sanode_idx]
+    q_logprob = log(action_probs[sanode_idx])
     return sanode, q_logprob
 end
 
 
-function adaptive_probs(values, prob_α, cost_α, prob_p, n, α, β, γ)
-    cvar_strategy = cost_α .* prob_p .+ (maximum(cost_α) / 20) .+ eps()
-    cdf_strategy = prob_α .* prob_p .+ (maximum(prob_α) * maximum(prob_p) / 20) .+ eps()
+"""
+Computes the probabilities with which to sample from the actions.
+"""
+function compute_action_probs(a_selection::Symbol, ucb_scores,
+                              est_α_probs, est_α_costs, nominal_probs,
+                              β, γ)
+    a_selection == :ucb && return ucb_probs(ucb_scores)
+    a_selection == :ucb_softmax && return ucb_softmax_probs(ucb_scores)
+    a_selection == :expected_cost && return expected_cost_probs()
+    a_selection == :adaptive &&
+        return adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
+    # TODO(kykim): Boltzmann exploration type strategy.
+    throw("Unsupported action selection strategy: $(a_selection)")
+end
 
-    # Normalize to unity.
-    cvar_strategy /= sum(cvar_strategy)
-    cdf_strategy /= sum(cdf_strategy)
 
-    # Mixture weighting.
-    probs = β * prob_p .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
-    return probs
+"""
+Returns an adaptive α to use for an action.
+"""
+function action_α(a_n, schedule, α)
+    w_annealed = 1.0 / (1.0 + schedule * a_n)
+    return w_annealed + (1 - w_annealed) * α
 end
 
 
 function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
                            β::Float64, γ::Float64, schedule::Float64)
-    mdp = dpw.mdp
     tree = dpw.tree
     sol = dpw.solver
     c = sol.exploration_constant
     virtual_loss = sol.virtual_loss
     α = sol.α
 
-    all_UCB = []
-    all_sanodes = []
+    ucb_scores = []
+    sanodes = []
     ltn = log(total_n(snode))
-    cost_α = []
-    prob_α = []
-    prob_p = []
-    all_α = []
+    est_α_costs = []
+    est_α_probs = []
+    nominal_probs = []
 
     # Instead of creating a copy, we can presumably just compute the no. of children and read only
     # that many elements of children(snode). But, this is also technically not safe as the vector
@@ -280,25 +288,26 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         # If applicable, apply virtual loss to the score.
         vloss = Base.@lock snode.s_lock begin; (a_label in snode.a_selected ? virtual_loss : 0.0) end;
         UCB -= vloss
-
-        @assert !isnan(UCB) "UCB was NaN (q=$a_q, c=$c, ltn=$ltn, n=$a_n)"
-        @assert !isequal(UCB, -Inf) "UCB was -Inf (q=$a_q, c=$c, ltn=$ltn, n=$a_n, vloss=$vloss, k_state=$(sol.k_state))"
         
-        push!(all_UCB, UCB)
-        push!(all_sanodes, sanode)
+        @assert !isnan(UCB) "UCB was NaN (q=$a_q, c=$c, ltn=$ltn, n=$a_n)"
+        @assert !isequal(UCB, -Inf) "UCB was -Inf (q=$a_q, c=$c, ltn=$ltn, n=$a_n)"
+        
+        push!(ucb_scores, UCB)
+        push!(sanodes, sanode)
 
-        w_annealed = 1.0 / (1.0 + schedule * a_n)
-        a_α = w_annealed + (1 - w_annealed) * α
-        est_quantile = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, α)
+        a_α = action_α(a_n, schedule, α)
+        est_quantile = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, a_α)
         c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.c_cdf_est, est_quantile)
         c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.c_cdf_est, est_quantile)
-        push!(cost_α, c_tail)
-        push!(prob_α, 1.0 - c_cdf)
-        push!(prob_p, pdf(action_distrib, a_label))
-        push!(all_α, a_α)
+        push!(est_α_costs, c_tail)
+        push!(est_α_probs, 1.0 - c_cdf)
+        push!(nominal_probs, pdf(action_distrib, a_label))
     end
 
-    sanode, q_logprob = select_action(all_sanodes, all_UCB, prob_α, cost_α, prob_p, tree.cdf_est.last_i, all_α, β, γ)
+    action_probs = compute_action_probs(sol.action_selection, ucb_scores,
+                                        est_α_probs, est_α_costs, nominal_probs,
+                                        β, γ)
+    sanode, q_logprob = select_action(sanodes, action_probs)
     Base.@lock snode.s_lock begin; push!(snode.a_selected, sanode.a_label); end
     return sanode, q_logprob
 end

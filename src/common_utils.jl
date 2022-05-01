@@ -1,29 +1,58 @@
 """
 Updates the accumulated cost.
 """
-function update_cost(acc_cost::Float64, new_cost::Union{Int64, Float64}, reduction::String)
-    if reduction == "sum"
+function update_cost(acc_cost::Float64, new_cost::Union{Int64,Float64},
+                     reduction_type::Symbol)
+    if reduction_type == :sum
         return acc_cost + new_cost
-    elseif reduction == "max"
+    elseif reduction_type == :max
         return max(acc_cost, new_cost)
     end
-    throw("Not implemented reduction $(reduction)!")
+    throw("Unsupported cost reduction strategy: $(reduction_type)")
 end
 
 
 """
-Utility function for numerically stable softmax.
+Numerically stable softmax.
 """
-_exp(x) = exp.(x .- maximum(x))
-_exp(x, θ::AbstractFloat) = exp.((x .- maximum(x)) * θ)
-_sftmax(e, d::Integer) = (e ./ sum(e, dims = d))
-
-function softmax(X, dim::Integer)
-    _sftmax(_exp(X), dim)
+function softmax(x, θ::AbstractFloat=1.0, dim::Integer=1)
+    x_exps = exp.((x .- maximum(x)) * θ)
+    return x_exps ./ sum(x_exps, dims=dim)
 end
 
-function softmax(X, dim::Integer, θ::Float64)
-    _sftmax(_exp(X, θ), dim)
+
+"""
+Various strategies for computing action selection probabilities.
+
+TODO(kykim): Consider putting these out into a separate jl.
+"""
+function ucb_probs(ucb_scores)
+    return ucb_scores /= sum(ucb_scores)
 end
 
-softmax(X) = softmax(X, 1)
+
+function ucb_softmax_probs(ucb_scores)
+    return softmax(ucb_scores, θ=1.0)
+end
+
+
+function expected_cost_probs(est_α_probs, est_α_costs)
+    exp_α_costs = est_α_probs .* est_α_costs
+    return exp_α_costs /= sum(exp_α_costs)
+end
+
+
+function adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
+    max_α_cost = maximum(est_α_costs)
+    max_α_prob = maximum(est_α_probs)
+    max_nominal_prob = maximum(nominal_probs)
+
+    cvar_strategy = est_α_costs .* nominal_probs .+ (max_α_cost / 20) .+ eps()
+    cdf_strategy = est_α_probs .* nominal_probs .+ (max_α_prob * max_nominal_prob / 20) .+ eps()
+    cvar_strategy /= sum(cvar_strategy)
+    cdf_strategy /= sum(cdf_strategy)
+
+    # Mixture weighting.
+    a_probs = β * nominal_probs .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
+    return a_probs
+end
