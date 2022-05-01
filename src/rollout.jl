@@ -1,5 +1,5 @@
 function rollout(mdp::Union{POMDP,MDP}, s, d::Int64,
-                 cost::Float64, weight::Float64, w_reduction::String,
+                 cost::Float64, weight::Float64, c_reduction::Symbol,
                  action_distrib_fn::Function)
     if d == 0 || isterminal(mdp, s)
         return cost, weight
@@ -8,17 +8,17 @@ function rollout(mdp::Union{POMDP,MDP}, s, d::Int64,
         action = rand(p_action)
 
         (sp, r) = @gen(:sp, :r)(mdp, s, action, Random.GLOBAL_RNG)
-        new_cost = update_cost(cost, r, w_reduction)
-        return rollout(mdp, sp, d - 1, cost, weight, w_reduction,
+        new_cost = update_cost(cost, r, c_reduction)
+        return rollout(mdp, sp, d - 1, cost, weight, c_reduction,
                        action_distrib_fn)
     end
 end
 
 
 function estimate_value(mdp::Union{POMDP,MDP}, state, depth::Int,
-                        cost::Float64, weight::Float64, w_reduction::String,
+                        cost::Float64, weight::Float64, c_reduction::Symbol,
                         action_distrib_fn::Function)
-    return rollout(mdp, state, depth, cost, weight, w_reduction,
+    return rollout(mdp, state, depth, cost, weight, c_reduction,
                    action_distrib_fn)
 end
 
