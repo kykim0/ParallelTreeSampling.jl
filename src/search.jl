@@ -233,7 +233,8 @@ function compute_action_probs(a_selection::Symbol, ucb_scores,
                               β, γ)
     a_selection == :ucb && return ucb_probs(ucb_scores)
     a_selection == :ucb_softmax && return ucb_softmax_probs(ucb_scores)
-    a_selection == :expected_cost && return expected_cost_probs()
+    a_selection == :expected_cost &&
+        return expected_cost_probs(est_α_probs, est_α_costs)
     a_selection == :adaptive &&
         return adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
     # TODO(kykim): Boltzmann exploration type strategy.

@@ -1,6 +1,4 @@
-"""
-Updates the accumulated cost.
-"""
+# Updates the accumulated cost.
 function update_cost(acc_cost::Float64, new_cost::Union{Int64,Float64},
                      reduction_type::Symbol)
     if reduction_type == :sum
@@ -12,27 +10,28 @@ function update_cost(acc_cost::Float64, new_cost::Union{Int64,Float64},
 end
 
 
-"""
-Numerically stable softmax.
-"""
+# Numerically stable softmax.
 function softmax(x, θ::AbstractFloat=1.0, dim::Integer=1)
     x_exps = exp.((x .- maximum(x)) * θ)
     return x_exps ./ sum(x_exps, dims=dim)
 end
 
 
-"""
-Various strategies for computing action selection probabilities.
-
-TODO(kykim): Consider putting these out into a separate jl.
-"""
+# Various strategies for computing action selection probabilities.
+# TODO(kykim): Consider putting these out into a separate jl.
 function ucb_probs(ucb_scores)
-    return ucb_scores /= sum(ucb_scores)
+    # In case all zeros, transform the vector to do uniform sampling.
+    if all(isapprox(e, 0.0) for e in ucb_scores)
+        scores = fill(1 / length(ucb_scores), length(ucb_scores))
+    else
+        scores = ucb_scores .- minimum(ucb_scores)
+    end
+    return scores /= sum(scores)
 end
 
 
 function ucb_softmax_probs(ucb_scores)
-    return softmax(ucb_scores, θ=1.0)
+    return softmax(ucb_scores, 1.0)
 end
 
 
