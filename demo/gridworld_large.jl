@@ -64,30 +64,36 @@ POMDPs.actionindex(mdp::RMDP, x) = findfirst(px.support .== x)
 
 fixed_s = GWPos(10,10)
 
-N = 500_000
-# base_N = 10_000_000
+N = 100_000
 base_N = 1_000_000
 c = 0.0
-α = 0.001; β = 0.1; γ = 0.3;
+α = 0.001; β = 0.1; γ = 0.3
 vloss = 0.0
+a_selection = :ucb
+save_output = true
 is_baseline = false
 
 path = "data"
 
 alpha_list = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
-date_str = Dates.format(Dates.now(), "mmdd-HHMM")
+date_str = Dates.format(Dates.now(), "yyyy-mm-dd")
+time_str = Dates.format(Dates.now(), "HHMM")
 
 function baseline(trial=0)
-    baseline_out = run_baseline(rmdp, fixed_s, px; N=base_N)
-    filename = string("gridworld_large_baseline_$(date_str)_$(base_N)",
-                      (trial > 0 ? string("_", trial) : "") ,".jld2")
-    save(joinpath(path, filename),
-         Dict("risks:" => baseline_out[1], "states:" => baseline_out[2]))
+    mc_out = run_mc(rmdp, fixed_s, px; N=base_N)
+    @assert length(mc_out[1]) == base_N
+    if save_output
+        filename = string("gwl_mc_$(time_str)_$(base_N)",
+                          (trial > 0 ? string("_", trial) : "") ,".jld2")
+        base_dir = joinpath(path, date_str)
+        mkpath(base_dir)
+        save(joinpath(base_dir, filename), Dict("risks:" => mc_out[1]))
+    end
 
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
-        m = eval_metrics(baseline_out[1]; alpha)
-        d[alpha][:N] = length(baseline_out[1]); d[alpha][:mean] = round(m.mean, digits=3);
+        m = eval_metrics(mc_out[1]; alpha)
+        d[alpha][:mean] = round(m.mean, digits=3);
         d[alpha][:var] = round(m.var, digits=3); d[alpha][:cvar] = round(m.cvar, digits=3);
         d[alpha][:worst] = round(m.worst, digits=3);
     end
@@ -97,20 +103,25 @@ end
 
 function mcts(trial=0)
     nominal_distrib_fn = (mdp, s) -> px
-    mcts_out, planner = run_mcts(
-        rmdp, fixed_s, nominal_distrib_fn; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+    mcts_out, planner = run_mcts(rmdp, fixed_s, nominal_distrib_fn, a_selection;
+                                 N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+    @assert length(mcts_out[1]) == N
     mcts_info = mcts_out[4]
-    filename = string("gridworld_large_mcts_$(date_str)_$(N)",
-                      (trial > 0 ? string("_", trial) : "") ,".jld2")
-    save(joinpath(path, filename),
-         Dict("risks:" => mcts_out[1], "states:" => mcts_out[2],
-              "weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
+    if save_output
+        filename = string("gwl_is_$(a_selection)_$(time_str)_$(N)",
+                          (trial > 0 ? string("_", trial) : "") ,".jld2")
+        base_dir = joinpath(path, date_str)
+        mkpath(base_dir)
+        save(joinpath(base_dir, filename),
+             Dict("risks:" => mcts_out[1], "states:" => mcts_out[2],
+                  "weights:" => mcts_out[3], "tree:" => mcts_info[:tree]))
+    end
     search_t = round(mcts_info[:search_time_s]; digits=3)
 
     d = Dict([(alpha, Dict()) for alpha in alpha_list])
     for alpha in alpha_list
         m = eval_metrics(mcts_out[1]; weights=exp.(mcts_out[3]), alpha=alpha)
-        d[alpha][:N] = length(mcts_out[1]); d[alpha][:mean] = round(m.mean, digits=3);
+        d[alpha][:mean] = round(m.mean, digits=3);
         d[alpha][:var] = round(m.var, digits=3); d[alpha][:cvar] = round(m.cvar, digits=3);
         d[alpha][:worst] = round(m.worst, digits=3);
     end
@@ -142,7 +153,7 @@ for (idx, metric) in enumerate(metrics)
     println("Run $(idx)")
     for alpha in alpha_list
         m_d = metric[alpha]
-        println(string("  [Alpha=$(alpha)] N: $(m_d[:N]), Mean: $(m_d[:mean]), ",
+        println(string("  [Alpha=$(alpha)] Mean: $(m_d[:mean]), ",
                        "VaR: $(m_d[:var]), CVaR: $(m_d[:cvar]), Worst: $(m_d[:worst])"))
     end
 end

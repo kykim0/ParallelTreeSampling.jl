@@ -8,17 +8,18 @@ include("utils.jl")
 
 
 # Parameters to be set for plotting.
-mc_data = ["data/gridworld_large_baseline_0427-2140_1000000_$(trial).jld2" for trial in 1:3]
+mc_base_dir = "data/2022-05-03"; is_base_dir = "data/2022-05-03"
+mc_data = [joinpath(mc_base_dir, "gwl_mc_1636_1000000_$(trial).jld2") for trial in 1:3]
 # mc_data = []
-is_data = ["data/gridworld_large_mcts_0427-2221_500000_$(trial).jld2" for trial in 1:3]
+is_data = [joinpath(is_base_dir, "gwl_is_ucb_1615_100000_$(trial).jld2") for trial in 1:3]
 # is_data = []
-max_num_mc = -1; max_num_is = -1;
-delta_n_mc = 10_000; delta_n_is = 10_000;
-plot_hist = true; plot_est = true;
+max_num_mc = -1; max_num_is = -1
+delta_n_mc = 100; delta_n_is = 100
+plot_hist = true; plot_est = true; log_scale = true
 output_dir = homedir()
 
 # Constants to be updated as needed.
-samples_key = "risks:"; weights_key = "weights:";
+samples_key = "risks:"; weights_key = "weights:"
 
 # Read the jld2 files.
 function load_jld2(jld2_filename)
@@ -55,34 +56,34 @@ end
 # Plot convergence graphs.
 alphas = [1e-4]
 if plot_est
-    figure(figsize=(9.0, 6.0))
+    PyPlot.plt.figure(figsize=(9.0, 6.0))
     if !isempty(n_mc_samples)
         for alpha in alphas
             alpha_str = @sprintf("%.1e", alpha)
             plot_estimates(n_mc_samples, estimate_fn(:var, alpha),
-                           delta_n_mc, "MC-VaR-$(alpha_str)")
+                           delta_n_mc, "MC-VaR-$(alpha_str)", log_scale)
             plot_estimates(n_mc_samples, estimate_fn(:cvar, alpha),
-                           delta_n_mc, "MC-CVaR-$(alpha_str)")
+                           delta_n_mc, "MC-CVaR-$(alpha_str)", log_scale)
         end
     end
     if !isempty(n_is_samples)
         for alpha in alphas
             alpha_str = @sprintf("%.1e", alpha)
             plot_estimates(n_is_samples, estimate_fn(:var, alpha, true),
-                           delta_n_is, "IS-VaR-$(alpha_str)")
+                           delta_n_is, "IS-VaR-$(alpha_str)", log_scale)
             plot_estimates(n_is_samples, estimate_fn(:cvar, alpha, true),
-                           delta_n_is, "IS-CVaR-$(alpha_str)")
+                           delta_n_is, "IS-CVaR-$(alpha_str)", log_scale)
         end
     end
     xlabel("no. samples"); ylabel("estimates"); legend();
     if !isempty(output_dir)
-        PyPlot.savefig(joinpath(output_dir, "estimates.png"))
+        PyPlot.plt.savefig(joinpath(output_dir, "estimates.png"))
     end
 end
 
 # Plot histograms.
 if plot_hist
-    figure(figsize=(9.0, 6.0))
+    PyPlot.plt.figure(figsize=(9.0, 6.0))
     if !isempty(n_mc_samples)
         samples = first(n_mc_samples)
         plot_histogram(samples, bins=50, label="MC")
@@ -94,6 +95,6 @@ if plot_hist
     end
     ylim(bottom=0.0); xlabel("costs"); ylabel("density"); legend();
     if !isempty(output_dir)
-        PyPlot.savefig(joinpath(output_dir, "histogram.png"))
+        PyPlot.plt.savefig(joinpath(output_dir, "histogram.png"))
     end
 end
