@@ -17,79 +17,86 @@ Constructs a PISTree and choose the best action.
 function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.0, γ=1.0, schedule=0.1)
     local a::Any  # actiontype(p.mdp)
     info = Dict{Symbol, Any}()
-    try
-        if isterminal(p.mdp, s)
-            error("MCTS cannot handle terminal states: s = $s")
-        end
 
-        tree = p.tree
-        if !p.solver.keep_tree || tree == nothing
-            # TODO(kykim): Temporary hack to get around the RMDP case.
-            # Should ideally be actiontype(p.mdp).
-            tree = PISTree{statetype(p.mdp),Any}()
-            p.tree = tree
-        end
-        snode = insert_state_node!(tree, s)
-
-        timer = p.solver.timer
-        start_s = timer()
-        timeout_s = start_s + p.solver.max_time
-        n_iterations = p.solver.n_iterations
-        p.solver.show_progress ? progress = Progress(n_iterations) : nothing
-
-        sim_channel = Channel{Task}(min(10_000, n_iterations)) do channel
-            # TODO(kykim): Try pulling out the add_sample! and update! calls out
-            # from the simulate() method.
-            for n in 1:n_iterations
-                put!(channel, Threads.@spawn simulate(p, snode, p.solver.depth, 0.0, 0.0,
-                                                      β, γ, schedule, timeout_s))
-            end
-        end
-
-        nquery = 0
-        for sim_task in sim_channel
-            if timer() > timeout_s
-                p.solver.show_progress ? finish!(progress) : nothing
-                @show Timeout reached
-                break
-            end
-
-            try
-                fetch(sim_task)  # Throws a TaskFailedException if failed.
-                nquery += 1
-                p.solver.show_progress ? next!(progress) : nothing
-            catch err
-                throw(err.task.exception)  # Throw the underlying exception.
-            end
-        end
-
-        p.reset_callback(p.mdp, s)  # Optional: Leave the MDP in the current state.
-        info[:search_time_s] = (timer() - start_s)
-        info[:tree_queries] = nquery
-        if p.solver.tree_in_info || tree_in_info
-            info[:tree] = tree
-        end
-
-        sanode = best_sanode(tree, snode)
-        a = sanode.a_label
-    catch ex
-        a = next_action(p.next_action, p.mdp, s, snode)
-        info[:exception] = ex
+    if isterminal(p.mdp, s)
+        error("MCTS cannot handle terminal states: s = $s")
     end
+
+    tree = p.tree
+    if !p.solver.keep_tree || tree == nothing
+        # TODO(kykim): Temporary hack to get around the RMDP case.
+        # Should ideally be actiontype(p.mdp).
+        tree = PISTree{statetype(p.mdp),Any}()
+        p.tree = tree
+    end
+    snode = insert_state_node!(tree, s)
+
+    timer = p.solver.timer
+    start_s = timer()
+    timeout_s = start_s + p.solver.max_time
+    n_iterations = p.solver.n_iterations
+    p.solver.show_progress ? progress = Progress(n_iterations) : nothing
+
+    sim_channel = Channel{Task}(min(10_000, n_iterations)) do channel
+        for n in 1:n_iterations
+            put!(channel, Threads.@spawn simulate_sample(
+                p, snode, β, γ, schedule, timeout_s))
+        end
+    end
+
+    nquery = 0
+    for sim_task in sim_channel
+        if timer() > timeout_s
+            p.solver.show_progress ? finish!(progress) : nothing
+            @show Timeout reached
+            break
+        end
+
+        try
+            fetch(sim_task)  # Throws a TaskFailedException if failed.
+            nquery += 1
+            p.solver.show_progress ? next!(progress) : nothing
+        catch err
+            throw(err.task.exception)  # Throw the underlying exception.
+        end
+    end
+
+    p.reset_callback(p.mdp, s)  # Optional: Leave the MDP in the current state.
+    info[:search_time_s] = (timer() - start_s)
+    info[:tree_queries] = nquery
+    if p.solver.tree_in_info || tree_in_info
+        info[:tree] = tree
+    end
+
+    sanode = best_sanode(tree, snode)
+    a = sanode.a_label
 
     return a, info
 end
 
 
 """
-Adds a sample to the tree.
+Simulates one sample.
 """
-function add_sample!(tree::PISTree, cost::Float64, weight::Float64)
+function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
+                         β::Float64=0.0, γ::Float64=1.0, schedule::Float64=0.1,
+                         timeout_s::Float64=0.0)
+    d = dpw.solver.depth
+    cost, weight = simulate(dpw, snode, d, 0.0, 0.0, β, γ, schedule, timeout_s)
+
+    tree = dpw.tree
     Base.@lock tree.costs_weights_lock begin
         push!(tree.costs, cost)
         push!(tree.weights, weight)
+
+        n_samples = length(tree.costs)
+        for i in tree.cdf_est.last_i+1:n_samples
+            # Depending on how fast/slow this is, making copies of costs and weights first then
+            # immediately releasing the lock can be better. But, of course, as we collect more
+            # samples, copying can increasingly be slow.
+            ImportanceWeightedRiskMetrics.update!(tree.cdf_est, tree.costs[i], exp(tree.weights[i]))
+        end
     end
-    return cost, weight
 end
 
 
@@ -106,23 +113,13 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     action_distrib_fn = sol.nominal_distrib_fn
     action_distrib = action_distrib_fn(dpw.mdp, s)
 
-    Base.@lock tree.costs_weights_lock begin
-        n_samples = length(tree.costs)
-        for i in tree.cdf_est.last_i+1:n_samples
-            # Depending on how fast/slow this is, making copies of costs and weights first then
-            # immediately releasing the lock can be better. But, of course, as we collect more
-            # samples, copying can increasingly be slow.
-            ImportanceWeightedRiskMetrics.update!(tree.cdf_est, tree.costs[i], exp(tree.weights[i]))
-        end
-    end
-
     if isterminal(dpw.mdp, s)
-        return add_sample!(tree, cost, weight)
+        return cost, weight
     elseif d == 0
         out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight,
                                               sol.cost_reduction,
                                               action_distrib_fn)
-        return add_sample!(tree, out_cost, out_weight)
+        return out_cost, out_weight
     end
 
     # Action progressive widening.
@@ -177,7 +174,6 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost,
                                               new_weight, sol.cost_reduction,
                                               action_distrib_fn)
-        add_sample!(tree, out_cost, out_weight)
         q = discount(dpw.mdp) * out_cost
     else
         out_cost, out_weight = simulate(

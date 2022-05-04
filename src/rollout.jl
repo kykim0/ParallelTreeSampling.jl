@@ -23,7 +23,7 @@ function estimate_value(mdp::Union{POMDP,MDP}, state, depth::Int,
 end
 
 
-function next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s, snode::PISStateNode)
+function next_action(gen::UniformActionGenerator, mdp::Union{POMDP,MDP}, s)
     rand(gen.rng, actions(mdp, s))
 end
 
