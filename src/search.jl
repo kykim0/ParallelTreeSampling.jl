@@ -14,7 +14,7 @@ POMDPs.action(p::PISPlanner, s) = first(action_info(p, s))
 """
 Constructs a PISTree and choose the best action.
 """
-function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.0, γ=1.0, schedule=0.1)
+function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, kwargs...)
     local a::Any  # actiontype(p.mdp)
     info = Dict{Symbol, Any}()
 
@@ -40,7 +40,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.
     sim_channel = Channel{Task}(min(10_000, n_iterations)) do channel
         for n in 1:n_iterations
             put!(channel, Threads.@spawn simulate_sample(
-                p, snode, β, γ, schedule, timeout_s))
+                p, snode, timeout_s; kwargs...))
         end
     end
 
@@ -64,7 +64,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, β=0.
     p.reset_callback(p.mdp, s)  # Optional: Leave the MDP in the current state.
     info[:search_time_s] = (timer() - start_s)
     info[:tree_queries] = nquery
-    if p.solver.tree_in_info || tree_in_info
+    if tree_in_info
         info[:tree] = tree
     end
 
@@ -79,10 +79,15 @@ end
 Simulates one sample.
 """
 function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
-                         β::Float64=0.0, γ::Float64=1.0, schedule::Float64=0.1,
-                         timeout_s::Float64=0.0)
+                         timeout_s::Float64=0.0; kwargs...)
+    kwargs = Dict(kwargs)
+    α = get(kwargs, :α, 0.1)
+    β = get(kwargs, :β, 0.0)
+    γ = get(kwargs, :γ, 1.0)
+    schedule = get(kwargs, :schedule, 0.0)
+
     d = dpw.solver.depth
-    cost, weight = simulate(dpw, snode, d, 0.0, 0.0, β, γ, schedule, timeout_s)
+    cost, weight = simulate(dpw, snode, d, 0.0, 0.0, timeout_s; α, β, γ, schedule)
 
     tree = dpw.tree
     Base.@lock tree.costs_weights_lock begin
@@ -105,8 +110,8 @@ Returns the reward for one iteration of MCTS.
 """
 function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
                   cost::Float64=0.0, weight::Float64=0.0,
-                  β::Float64=0.0, γ::Float64=1.0, schedule::Float64=0.1,
-                  timeout_s::Float64=0.0)
+                  timeout_s::Float64=0.0;
+                  α::Float64, β::Float64, γ::Float64, schedule::Float64)
     sol = dpw.solver
     tree = dpw.tree
     s = snode.s_label
@@ -138,7 +143,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         end
     end
 
-    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, β, γ, schedule)
+    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, α, β, γ, schedule)
     a = sanode.a_label
     w_node = compute_weight(q_logprob, a, action_distrib)
 
@@ -177,7 +182,8 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         q = discount(dpw.mdp) * out_cost
     else
         out_cost, out_weight = simulate(
-            dpw, spnode, d - 1, new_cost, new_weight, β, γ, schedule, timeout_s)
+            dpw, spnode, d - 1, new_cost, new_weight, timeout_s;
+            α, β, γ, schedule)
         q = discount(dpw.mdp) * out_cost
     end
 
@@ -241,19 +247,20 @@ end
 """
 Returns an adaptive α to use for an action.
 """
-function action_α(a_n, schedule, α)
+function action_α(α, a_n, schedule)
+    schedule == 0.0 && return α
     w_annealed = 1.0 / (1.0 + schedule * a_n)
     return w_annealed + (1 - w_annealed) * α
 end
 
 
 function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
-                           β::Float64, γ::Float64, schedule::Float64)
+                           α::Float64, β::Float64, γ::Float64,
+                           schedule::Float64)
     tree = dpw.tree
     sol = dpw.solver
     c = sol.exploration_constant
     virtual_loss = sol.virtual_loss
-    α = sol.α
 
     ucb_scores = []
     sanodes = []
@@ -292,7 +299,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         push!(ucb_scores, UCB)
         push!(sanodes, sanode)
 
-        a_α = action_α(a_n, schedule, α)
+        a_α = action_α(α, a_n, schedule)
         est_quantile = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, a_α)
         c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.c_cdf_est, est_quantile)
         c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.c_cdf_est, est_quantile)

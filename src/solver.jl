@@ -36,9 +36,6 @@ Fields:
     enable_state_pw::Bool
         If true, enable progressive widening on the state space; if false just use the single next state (for deterministic problems).
         default: true
-    tree_in_info::Bool
-        If true, return the tree in the info dict when action_info is called. False by default because it can use a lot of memory if histories are being saved.
-        default: false
     rng::AbstractRNG
         Random number generator
     init_Q::Any
@@ -91,7 +88,6 @@ mutable struct PISSolver
     keep_tree::Bool
     enable_action_pw::Bool
     enable_state_pw::Bool
-    tree_in_info::Bool
     rng::AbstractRNG
     init_Q::Any
     init_N::Any
@@ -100,8 +96,6 @@ mutable struct PISSolver
     reset_callback::Function
     show_progress::Bool
     timer::Function
-    # TODO(kykim): Either put all params in the solver or make them method args.
-    α::Float64
 end
 
 mutable struct UniformActionGenerator{RNG<:AbstractRNG}
@@ -127,7 +121,6 @@ function PISSolver(;depth::Int=10,
                    keep_tree::Bool=false,
                    enable_action_pw::Bool=true,
                    enable_state_pw::Bool=true,
-                   tree_in_info::Bool=false,
                    rng::AbstractRNG=Random.GLOBAL_RNG,
                    init_Q::Any=0.0,
                    init_N::Any=1,
@@ -135,14 +128,12 @@ function PISSolver(;depth::Int=10,
                    default_action::Any=nothing,
                    reset_callback::Function=(mdp, s)->false,
                    show_progress::Bool=false,
-                   timer=()->1e-9*time_ns(),
-                   α::Float64=0.1)
+                   timer=()->1e-9*time_ns())
     PISSolver(depth, exploration_constant, n_iterations, max_time, k_action,
               alpha_action, k_state, alpha_state, virtual_loss,
               nominal_distrib_fn, cost_reduction, action_selection, keep_tree,
-              enable_action_pw, enable_state_pw, tree_in_info, rng, init_Q,
-              init_N, next_action, default_action, reset_callback,
-              show_progress, timer, α)
+              enable_action_pw, enable_state_pw, rng, init_Q, init_N,
+              next_action, default_action, reset_callback, show_progress, timer)
 end
 
 
