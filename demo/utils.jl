@@ -12,19 +12,19 @@ using ParallelTreeSampling
 
 
 # Runs Monte Carlo baseline.
-function run_mc(amdp::MDP, s, distrib_fn; N=1000)
-    function_policy = (s) -> rand(distrib_fn(amdp, s))
-    costs = [sum(collect(simulate(HistoryRecorder(), amdp, function_policy, s)[:r]))
+function run_mc(amdp::MDP, init_s, distrib_fn::Function; N=1000)
+    function_policy = FunctionPolicy((s) -> rand(distrib_fn(amdp, s)))
+    costs = [sum(collect(simulate(HistoryRecorder(), amdp, function_policy, init_s)[:r]))
              for _ in 1:N]
     output = (costs, [])
     return output
 end
 
 
-function run_mc(rmdp::RMDP, s, px; N=1000)
+function run_mc(rmdp::RMDP, init_s, px; N=1000)
     noise_fn = (s) -> rand(px)  # Random noise.
     function_policy = FunctionPolicy(noise_fn)
-    costs = [sum(collect(simulate(HistoryRecorder(), rmdp, function_policy, s)[:r]))
+    costs = [sum(collect(simulate(HistoryRecorder(), rmdp, function_policy, init_s)[:r]))
              for _ in 1:N]
     output = (costs,)
     return output
