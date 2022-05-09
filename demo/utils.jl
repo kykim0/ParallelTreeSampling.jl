@@ -33,7 +33,8 @@ end
 
 # Runs MCTS-based sampling.
 function run_mcts(mdp::MDP, s, nominal_distrib_fn, a_selection;
-                  N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, γ=0.0)
+                  N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, γ=0.0,
+                  show_progress=true)
     solver = PISSolver(; depth=100,
                        exploration_constant=c,
                        n_iterations=N,
@@ -42,10 +43,10 @@ function run_mcts(mdp::MDP, s, nominal_distrib_fn, a_selection;
                        virtual_loss=vloss,
                        nominal_distrib_fn=nominal_distrib_fn,
                        action_selection=a_selection,
-                       show_progress=true)
+                       show_progress=show_progress)
     planner = solve(solver, mdp)
     a, info = action_info(planner, s; tree_in_info=true,
-                          α=α, β=β, γ=γ, schedule=0.1)
+                          α=α, β=β, γ=γ, schedule=0.0)
     tree = info[:tree]
     output = (tree.costs, tree.weights, info)
     return output, planner
