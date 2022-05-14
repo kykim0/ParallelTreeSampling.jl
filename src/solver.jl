@@ -27,8 +27,18 @@ Fields:
         evaluated by some threads. This can be used to encourage threads to explore
         broader parts of the search space. Relevant when running MCTS with multiple threads.
         default: 0.0
+    nominal_distrib_fn::Function
+        A function that takes in an MDP and a state as input and returns the
+        nominal distribution over actions. Used for computing the weights.
+    cost_reduction::Symbol
+    action_selection::Symbol
+        The type of strategy to use for reducing costs, selecting actions, etc.
+    experiment_config::Any
+        Various experimental settings. After finishing experimenting should be
+        either removed or promoted to be separat ctor args. See the struct for
+        the current experiment flags and definitions.
     keep_tree::Bool
-        If true, store the tree in the planner for reuse at the next timestep (and every time it is used in the future). There is a computational cost for maintaining the state dictionary necessary for this.
+        If true, store the tree in the planner for reuse at the next timestep.
         default: false
     enable_action_pw::Bool
         If true, enable progressive widening on the action space; if false just use the whole action space.
@@ -36,9 +46,6 @@ Fields:
     enable_state_pw::Bool
         If true, enable progressive widening on the state space; if false just use the single next state (for deterministic problems).
         default: true
-    tree_in_info::Bool
-        If true, return the tree in the info dict when action_info is called. False by default because it can use a lot of memory if histories are being saved.
-        default: false
     rng::AbstractRNG
         Random number generator
     init_Q::Any
@@ -74,7 +81,6 @@ Fields:
         Show progress bar during simulation.
         default: false
 """
-
 mutable struct PISSolver
     depth::Int
     exploration_constant::Float64
@@ -88,10 +94,10 @@ mutable struct PISSolver
     nominal_distrib_fn::Function
     cost_reduction::Symbol
     action_selection::Symbol
+    experiment_config::Any
     keep_tree::Bool
     enable_action_pw::Bool
     enable_state_pw::Bool
-    tree_in_info::Bool
     rng::AbstractRNG
     init_Q::Any
     init_N::Any
@@ -100,8 +106,11 @@ mutable struct PISSolver
     reset_callback::Function
     show_progress::Bool
     timer::Function
-    # TODO(kykim): Either put all params in the solver or make them method args.
-    α::Float64
+end
+
+Base.@kwdef struct ExperimentConfig
+    nominal_steps::Int = 0
+    update_period::Int = -1
 end
 
 mutable struct UniformActionGenerator{RNG<:AbstractRNG}
@@ -124,10 +133,10 @@ function PISSolver(;depth::Int=10,
                    nominal_distrib_fn=(mdp, s)->Normal(0, 1),
                    cost_reduction::Symbol=:sum,
                    action_selection::Symbol=:adaptive,
+                   experiment_config::Any=ExperimentConfig(),
                    keep_tree::Bool=false,
                    enable_action_pw::Bool=true,
                    enable_state_pw::Bool=true,
-                   tree_in_info::Bool=false,
                    rng::AbstractRNG=Random.GLOBAL_RNG,
                    init_Q::Any=0.0,
                    init_N::Any=1,
@@ -135,14 +144,13 @@ function PISSolver(;depth::Int=10,
                    default_action::Any=nothing,
                    reset_callback::Function=(mdp, s)->false,
                    show_progress::Bool=false,
-                   timer=()->1e-9*time_ns(),
-                   α::Float64=0.1)
+                   timer=()->1e-9*time_ns())
     PISSolver(depth, exploration_constant, n_iterations, max_time, k_action,
               alpha_action, k_state, alpha_state, virtual_loss,
-              nominal_distrib_fn, cost_reduction, action_selection, keep_tree,
-              enable_action_pw, enable_state_pw, tree_in_info, rng, init_Q,
-              init_N, next_action, default_action, reset_callback,
-              show_progress, timer, α)
+              nominal_distrib_fn, cost_reduction, action_selection,
+              experiment_config, keep_tree, enable_action_pw, enable_state_pw,
+              rng, init_Q, init_N, next_action, default_action, reset_callback,
+              show_progress, timer)
 end
 
 

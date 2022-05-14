@@ -13,7 +13,7 @@ include("common_utils.jl")
 
 include("tree.jl")
 
-export PISSolver, PISPlanner
+export PISSolver, PISPlanner, ExperimentConfig
 include("solver.jl")
 
 include("rollout.jl")
