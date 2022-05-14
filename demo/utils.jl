@@ -35,6 +35,7 @@ end
 function run_mcts(mdp::MDP, s, nominal_distrib_fn, a_selection;
                   N=1000, c=0.3, vloss=0.0, α=0.1, β=1.0, γ=0.0,
                   nominal_steps=0, show_progress=true)
+    experiment_config = ExperimentConfig(nominal_steps=nominal_steps)
     solver = PISSolver(; depth=100,
                        exploration_constant=c,
                        n_iterations=N,
@@ -43,7 +44,7 @@ function run_mcts(mdp::MDP, s, nominal_distrib_fn, a_selection;
                        virtual_loss=vloss,
                        nominal_distrib_fn=nominal_distrib_fn,
                        action_selection=a_selection,
-                       nominal_steps=nominal_steps,
+                       experiment_config=experiment_config,
                        show_progress=show_progress)
     planner = solve(solver, mdp)
     a, info = action_info(planner, s; tree_in_info=true,

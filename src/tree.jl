@@ -42,9 +42,15 @@ mutable struct PISTree{S,A}
     state_nodes::Dict{S, PISStateNode}
     state_action_nodes::Dict{Tuple{S,A}, PISActionNode}
 
-    cdf_est::RunningCDFEstimator
+    # TODO(kykim): We might replace cdf_est with simply using IWRiskMetrics to
+    # estimate VaR using the costs and weights. Though possibly slower, this
+    # might make it easier to e.g., implement DM type weighting.
+    cdf_est::RunningCDFEstimator  # For empirical estimate of VaR.
     costs::Vector{Float64}
     weights::Vector{Float64}
+    _emp_ests::Dict{Symbol, Any}  # Running empirical estimates used internally.
+    _cost_actions::Vector{Vector{A}}       # Actions taken for each cost.
+    _all_weights::Vector{Vector{Float64}}  # All weights for each cost used for DM weighting.
 
     state_nodes_lock::ReentrantLock
     state_action_nodes_lock::ReentrantLock
@@ -62,6 +68,9 @@ mutable struct PISTree{S,A}
                    RunningCDFEstimator([0.0], [1e-7]),
                    sizehint!(Float64[], 10_000),
                    sizehint!(Float64[], 10_000),
+                   Dict{Symbol, Any}(),
+                   sizehint!(Vector{A}[], 10_000),
+                   sizehint!(Vector{Float64}[], 10_000),
 
                    ReentrantLock(),
                    ReentrantLock(),

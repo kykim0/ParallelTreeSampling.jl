@@ -23,7 +23,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, kwarg
     end
 
     tree = p.tree
-    if !p.solver.keep_tree || tree == nothing
+    if !p.solver.keep_tree || isnothing(tree)
         # TODO(kykim): Temporary hack to get around the RMDP case.
         # Should ideally be actiontype(p.mdp).
         tree = PISTree{statetype(p.mdp),Any}()
@@ -37,6 +37,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, kwarg
     n_iterations = p.solver.n_iterations
     p.solver.show_progress ? progress = Progress(n_iterations) : nothing
 
+    # TODO(kykim): Implement DM weighting.
     sim_channel = Channel{Task}(min(10_000, n_iterations)) do channel
         for n in 1:n_iterations
             put!(channel, Threads.@spawn simulate_sample(
@@ -80,6 +81,8 @@ Simulates one sample.
 """
 function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
                          iter_n::Integer, timeout_s::Float64=0.0; kwargs...)
+    tree = dpw.tree
+
     kwargs = Dict(kwargs)
     α = get(kwargs, :α, 0.1)
     β = get(kwargs, :β, 0.0)
@@ -87,13 +90,15 @@ function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
     schedule = get(kwargs, :schedule, 0.0)
 
     d = dpw.solver.depth
-    cost, weight = simulate(dpw, snode, d, 0.0, 0.0, iter_n, timeout_s; α, β, γ, schedule)
+    est_var = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, α)
+    cost, weight = simulate(dpw, snode, d, 0.0, 0.0, iter_n, timeout_s;
+                            est_var, α, β, γ, schedule)
 
-    tree = dpw.tree
     Base.@lock tree.costs_weights_lock begin
         push!(tree.costs, cost)
         push!(tree.weights, weight)
 
+        # TODO(kykim): Try updating the tree cdf only once every n iterations.
         n_samples = length(tree.costs)
         for i in tree.cdf_est.last_i+1:n_samples
             # Depending on how fast/slow this is, making copies of costs and weights first then
@@ -111,7 +116,8 @@ Returns the reward for one iteration of MCTS.
 function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
                   cost::Float64=0.0, weight::Float64=0.0,
                   iter_n::Integer=0, timeout_s::Float64=0.0;
-                  α::Float64, β::Float64, γ::Float64, schedule::Float64)
+                  est_var::Float64, α::Float64, β::Float64,
+                  γ::Float64, schedule::Float64)
     sol = dpw.solver
     tree = dpw.tree
     s = snode.s_label
@@ -143,7 +149,8 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         end
     end
 
-    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, α, β, γ, schedule, iter_n)
+    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, est_var,
+                                          α, β, γ, schedule, iter_n)
     a = sanode.a_label
     w_node = compute_weight(q_logprob, a, action_distrib)
 
@@ -183,7 +190,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     else
         out_cost, out_weight = simulate(
             dpw, spnode, d - 1, new_cost, new_weight, iter_n, timeout_s;
-            α, β, γ, schedule)
+            est_var, α, β, γ, schedule)
         q = discount(dpw.mdp) * out_cost
     end
 
@@ -206,7 +213,7 @@ end
 Computes importance weights i.e., p/q.
 """
 function compute_weight(q_logprob, a, distribution)
-    if distribution == nothing
+    if isnothing(distribution)
         w = -q_logprob
     else
         w = logpdf(distribution, a) - q_logprob
@@ -222,6 +229,7 @@ function select_action(sanodes, action_probs)
     sanode_idx = sample(1:length(sanodes), Weights(action_probs))
     sanode = sanodes[sanode_idx]
     q_logprob = log(action_probs[sanode_idx])
+    @assert !isnan(q_logprob) "q_logprob NaN $(action_probs)"
     return sanode, q_logprob
 end
 
@@ -229,7 +237,7 @@ end
 """
 Computes the probabilities with which to sample from the actions.
 """
-function compute_action_probs(a_selection::Symbol, ucb_scores,
+function compute_action_probs(a_selection::Symbol, est_var, ucb_scores,
                               est_α_probs, est_α_costs, nominal_probs,
                               β, γ)
     a_selection == :nominal && return nominal_probs
@@ -257,7 +265,7 @@ end
 
 
 function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
-                           α::Float64, β::Float64, γ::Float64,
+                           est_var::Float64, α::Float64, β::Float64, γ::Float64,
                            schedule::Float64, iter_n::Integer)
     tree = dpw.tree
     sol = dpw.solver
@@ -270,6 +278,9 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
     est_α_costs = []
     est_α_probs = []
     nominal_probs = []
+
+    # α schedule for potentially smoother convergence.
+    a_α = action_α(α, 1.0, 0.0)
 
     # Instead of creating a copy, we can presumably just compute the no. of children and read only
     # that many elements of children(snode). But, this is also technically not safe as the vector
@@ -301,17 +312,20 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         push!(ucb_scores, UCB)
         push!(sanodes, sanode)
 
-        a_α = action_α(α, a_n, schedule)
-        est_quantile = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, a_α)
-        c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.c_cdf_est, est_quantile)
-        c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.c_cdf_est, est_quantile)
+        # TODO(kykim): Should the scheduling be really at the action level i.e.
+        #   a_α = action_α(α, a_n, schedule)
+        #   est_var = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, a_α)
+        c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.c_cdf_est, est_var)
+        c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.c_cdf_est, est_var)
         push!(est_α_costs, c_tail)
         push!(est_α_probs, 1.0 - c_cdf)
         push!(nominal_probs, pdf(action_distrib, a_label))
     end
 
-    a_select = iter_n < sol.nominal_steps ? :nominal : sol.action_selection
-    action_probs = compute_action_probs(a_select, ucb_scores,
+    nominal_steps = sol.experiment_config.nominal_steps
+    a_select = iter_n < nominal_steps ? :nominal : sol.action_selection
+    # TODO(kykim): Can be at the simulate() level.
+    action_probs = compute_action_probs(a_select, est_var, ucb_scores,
                                         est_α_probs, est_α_costs, nominal_probs,
                                         β, γ)
     sanode, q_logprob = select_action(sanodes, action_probs)

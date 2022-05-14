@@ -17,16 +17,18 @@ function softmax(x, θ::AbstractFloat=1.0, dim::Integer=1)
 end
 
 
+# Uniform probability vector of a given length.
+uniform_probs(n::Integer) = fill(1 / n, n)
+
 # Various strategies for computing action selection probabilities.
 # TODO(kykim): Consider putting these out into a separate jl.
 function ucb_probs(ucb_scores)
-    # In case all zeros, transform the vector to do uniform sampling.
     if all(isapprox(e, 0.0) for e in ucb_scores)
-        scores = fill(1 / length(ucb_scores), length(ucb_scores))
-    else
-        scores = ucb_scores .- minimum(ucb_scores)
+        return uniform_probs(length(ucb_scores))
     end
-    return scores /= sum(scores)
+    scores = ucb_scores .- minimum(ucb_scores)
+    scores /= sum(scores)
+    return scores
 end
 
 
@@ -36,8 +38,26 @@ end
 
 
 function expected_cost_probs(est_α_probs, est_α_costs)
-    exp_α_costs = est_α_probs .* est_α_costs
-    return exp_α_costs /= sum(exp_α_costs)
+    if all(isapprox(c, 0.0) for c in est_α_costs)
+        return uniform_probs(length(est_α_costs))
+    end
+    scores = est_α_probs .* est_α_costs
+    scores /= sum(scores)
+    return scores
+end
+
+
+function var_sigmoid(est_var, est_α_probs, est_α_costs, nominal_probs)
+    if all(isapprox(c, 0.0) for c in est_α_costs)
+        return uniform_probs(length(est_α_costs))
+    end
+
+    # TODO(kykim): Divide by the current worst cost?
+    norm_costs = (est_α_costs .- est_var) / (maximum(est_α_costs) + eps())
+    @assert !any(isnan(c) for c in norm_costs) "norm_costs NaN $(norm_costs)"
+    scores = 1 ./ (1 .+ exp.(-norm_costs))  # Sigmoid centered at est_var.
+    @assert !any(isnan(s) for s in scores) "scores NaN $(scores)"
+    return scores ./ sum(scores)
 end
 
 
