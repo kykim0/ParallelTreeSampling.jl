@@ -40,7 +40,7 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, kwarg
     sim_channel = Channel{Task}(min(10_000, n_iterations)) do channel
         for n in 1:n_iterations
             put!(channel, Threads.@spawn simulate_sample(
-                p, snode, timeout_s; kwargs...))
+                p, snode, n, timeout_s; kwargs...))
         end
     end
 
@@ -79,7 +79,7 @@ end
 Simulates one sample.
 """
 function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
-                         timeout_s::Float64=0.0; kwargs...)
+                         iter_n::Integer, timeout_s::Float64=0.0; kwargs...)
     kwargs = Dict(kwargs)
     α = get(kwargs, :α, 0.1)
     β = get(kwargs, :β, 0.0)
@@ -87,7 +87,7 @@ function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
     schedule = get(kwargs, :schedule, 0.0)
 
     d = dpw.solver.depth
-    cost, weight = simulate(dpw, snode, d, 0.0, 0.0, timeout_s; α, β, γ, schedule)
+    cost, weight = simulate(dpw, snode, d, 0.0, 0.0, iter_n, timeout_s; α, β, γ, schedule)
 
     tree = dpw.tree
     Base.@lock tree.costs_weights_lock begin
@@ -110,7 +110,7 @@ Returns the reward for one iteration of MCTS.
 """
 function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
                   cost::Float64=0.0, weight::Float64=0.0,
-                  timeout_s::Float64=0.0;
+                  iter_n::Integer=0, timeout_s::Float64=0.0;
                   α::Float64, β::Float64, γ::Float64, schedule::Float64)
     sol = dpw.solver
     tree = dpw.tree
@@ -143,7 +143,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         end
     end
 
-    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, α, β, γ, schedule)
+    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, α, β, γ, schedule, iter_n)
     a = sanode.a_label
     w_node = compute_weight(q_logprob, a, action_distrib)
 
@@ -182,7 +182,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         q = discount(dpw.mdp) * out_cost
     else
         out_cost, out_weight = simulate(
-            dpw, spnode, d - 1, new_cost, new_weight, timeout_s;
+            dpw, spnode, d - 1, new_cost, new_weight, iter_n, timeout_s;
             α, β, γ, schedule)
         q = discount(dpw.mdp) * out_cost
     end
@@ -194,8 +194,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
             delete!(snode.a_selected, sanode.a_label)
             sanode.n += 1
             sanode.q += (q - sanode.q) / sanode.n
-            ImportanceWeightedRiskMetrics.update!(
-                sanode.c_cdf_est, q, exp(out_weight))
+            ImportanceWeightedRiskMetrics.update!(sanode.c_cdf_est, q, 1.0)
         end
     end
 
@@ -233,10 +232,13 @@ Computes the probabilities with which to sample from the actions.
 function compute_action_probs(a_selection::Symbol, ucb_scores,
                               est_α_probs, est_α_costs, nominal_probs,
                               β, γ)
+    a_selection == :nominal && return nominal_probs
     a_selection == :ucb && return ucb_probs(ucb_scores)
     a_selection == :ucb_softmax && return ucb_softmax_probs(ucb_scores)
     a_selection == :expected_cost &&
         return expected_cost_probs(est_α_probs, est_α_costs)
+    a_selection == :mixture &&
+        return mixture_probs(est_α_probs, est_α_costs, nominal_probs, γ)
     a_selection == :adaptive &&
         return adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
     # TODO(kykim): Boltzmann exploration type strategy.
@@ -256,7 +258,7 @@ end
 
 function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
                            α::Float64, β::Float64, γ::Float64,
-                           schedule::Float64)
+                           schedule::Float64, iter_n::Integer)
     tree = dpw.tree
     sol = dpw.solver
     c = sol.exploration_constant
@@ -308,7 +310,8 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         push!(nominal_probs, pdf(action_distrib, a_label))
     end
 
-    action_probs = compute_action_probs(sol.action_selection, ucb_scores,
+    a_select = iter_n < sol.nominal_steps ? :nominal : sol.action_selection
+    action_probs = compute_action_probs(a_select, ucb_scores,
                                         est_α_probs, est_α_costs, nominal_probs,
                                         β, γ)
     sanode, q_logprob = select_action(sanodes, action_probs)

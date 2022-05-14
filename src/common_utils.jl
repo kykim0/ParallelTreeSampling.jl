@@ -41,6 +41,20 @@ function expected_cost_probs(est_α_probs, est_α_costs)
 end
 
 
+function mixture_probs(est_α_probs, est_α_costs, nominal_probs, γ)
+    var_distrib = nominal_probs .* est_α_probs .+ eps()
+    cvar_distrib = nominal_probs .* est_α_probs .* est_α_costs .+ eps()
+
+    var_distrib /= sum(var_distrib)
+    cvar_distrib /= sum(cvar_distrib)
+
+    # Mixture weighting.
+    mixture_distrib = γ * var_distrib .+ (1 - γ) * cvar_distrib
+    mixture_distrib /= sum(mixture_distrib)
+    return mixture_distrib
+end
+
+
 function adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
     max_α_cost = maximum(est_α_costs)
     max_α_prob = maximum(est_α_probs)

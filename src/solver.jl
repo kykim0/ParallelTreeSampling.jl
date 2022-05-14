@@ -85,6 +85,7 @@ mutable struct PISSolver
     nominal_distrib_fn::Function
     cost_reduction::Symbol
     action_selection::Symbol
+    nominal_steps::Int
     keep_tree::Bool
     enable_action_pw::Bool
     enable_state_pw::Bool
@@ -118,6 +119,7 @@ function PISSolver(;depth::Int=10,
                    nominal_distrib_fn=(mdp, s)->Normal(0, 1),
                    cost_reduction::Symbol=:sum,
                    action_selection::Symbol=:adaptive,
+                   nominal_steps::Int=0,
                    keep_tree::Bool=false,
                    enable_action_pw::Bool=true,
                    enable_state_pw::Bool=true,
@@ -131,9 +133,10 @@ function PISSolver(;depth::Int=10,
                    timer=()->1e-9*time_ns())
     PISSolver(depth, exploration_constant, n_iterations, max_time, k_action,
               alpha_action, k_state, alpha_state, virtual_loss,
-              nominal_distrib_fn, cost_reduction, action_selection, keep_tree,
-              enable_action_pw, enable_state_pw, rng, init_Q, init_N,
-              next_action, default_action, reset_callback, show_progress, timer)
+              nominal_distrib_fn, cost_reduction, action_selection,
+              nominal_steps, keep_tree, enable_action_pw, enable_state_pw, rng,
+              init_Q, init_N, next_action, default_action, reset_callback,
+              show_progress, timer)
 end
 
 
