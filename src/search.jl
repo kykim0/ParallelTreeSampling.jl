@@ -118,9 +118,10 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
                   iter_n::Integer=0, timeout_s::Float64=0.0;
                   est_var::Float64, α::Float64, β::Float64,
                   γ::Float64, schedule::Float64)
-    sol = dpw.solver
     tree = dpw.tree
+    sol = dpw.solver
     s = snode.s_label
+    exp_config = sol.experiment_config
     action_distrib_fn = sol.nominal_distrib_fn
     action_distrib = action_distrib_fn(dpw.mdp, s)
 
@@ -149,8 +150,19 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         end
     end
 
-    sanode, q_logprob = sample_sanode_UCB(dpw, snode, action_distrib, est_var,
-                                          α, β, γ, schedule, iter_n)
+    # Compute various action statistics.
+    sanodes, ucb_scores, est_α_probs, est_α_costs, nominal_probs = sanode_stats(
+        dpw, snode, action_distrib, est_var, α, schedule)
+
+    # Sample an action based on the stats and action selection method.
+    nominal_steps = exp_config.nominal_steps
+    a_select = iter_n < nominal_steps ? :nominal : sol.action_selection
+    action_probs = compute_action_probs(a_select, est_var, ucb_scores,
+                                        est_α_probs, est_α_costs, nominal_probs,
+                                        β, γ)
+    sanode, q_logprob = select_action(sanodes, action_probs)
+    Base.@lock snode.s_lock begin; push!(snode.a_selected, sanode.a_label); end
+
     a = sanode.a_label
     w_node = compute_weight(q_logprob, a, action_distrib)
 
@@ -264,9 +276,8 @@ function action_α(α, a_n, schedule)
 end
 
 
-function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
-                           est_var::Float64, α::Float64, β::Float64, γ::Float64,
-                           schedule::Float64, iter_n::Integer)
+function sanode_stats(dpw::PISPlanner, snode::PISStateNode, action_distrib,
+                      est_var::Float64, α::Float64, schedule::Float64)
     tree = dpw.tree
     sol = dpw.solver
     c = sol.exploration_constant
@@ -287,6 +298,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
     # can grow in size and be resized around the same time when we access the element.
     sa_children = Base.@lock snode.s_lock begin; deepcopy(children(snode)) end
     for a_label in sa_children
+        sanode = nothing
         Base.@lock tree.state_action_nodes_lock begin
             state_action_key = sanode_key(snode.s_label, a_label)
             if !haskey(tree.state_action_nodes, state_action_key)
@@ -322,15 +334,7 @@ function sample_sanode_UCB(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         push!(nominal_probs, pdf(action_distrib, a_label))
     end
 
-    nominal_steps = sol.experiment_config.nominal_steps
-    a_select = iter_n < nominal_steps ? :nominal : sol.action_selection
-    # TODO(kykim): Can be at the simulate() level.
-    action_probs = compute_action_probs(a_select, est_var, ucb_scores,
-                                        est_α_probs, est_α_costs, nominal_probs,
-                                        β, γ)
-    sanode, q_logprob = select_action(sanodes, action_probs)
-    Base.@lock snode.s_lock begin; push!(snode.a_selected, sanode.a_label); end
-    return sanode, q_logprob
+    return sanodes, ucb_scores, est_α_probs, est_α_costs, nominal_probs
 end
 
 
