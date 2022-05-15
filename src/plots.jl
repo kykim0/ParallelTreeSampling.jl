@@ -12,6 +12,8 @@ using PyPlot
 #   log_scale: true to set x on the log scale.
 function plot_estimates(n_samples::Vector, estimate_fn::Function,
                         delta_n::Integer, label::String, log_scale::Bool=false)
+    if isempty(n_samples); return nothing; end
+
     # Compute the x range.
     if isa(first(n_samples), Tuple)
         total_n = length(first(n_samples)[1])
@@ -22,7 +24,11 @@ function plot_estimates(n_samples::Vector, estimate_fn::Function,
     x_i = delta_n
     while x_i < total_n
         push!(xl, x_i)
-        x_i = log_scale ? 10 * x_i : x_i + delta_n
+        if log_scale
+            x_i = length(xl) % 2 == 1 ? 5 * x_i : 10 * x_i
+        else
+            x_i += delta_n
+        end
     end
     if (last(xl) != total_n); push!(xl, total_n); end
 
@@ -48,6 +54,21 @@ end
 function plot_histogram(samples::Vector, weights::Union{Vector,Nothing}=nothing;
                         bins::Integer=10, density::Bool=true,
                         label::String=nothing)
+    if isempty(samples); return; end
+
     PyPlot.plt.hist(samples, bins, weights=weights, density=density,
                     label=label, alpha=0.3)
+end
+
+
+# Plots bar graphs of a series of samples.
+function plot_samples(samples::Vector; n::Integer, label::String=nothing)
+    if isempty(samples); return; end
+
+    # Create a subset of samples of size roughly n.
+    delta_n = Int(floor(length(samples) / n))
+    samples = samples[1:delta_n:end]
+    xs = [x for x in 1:length(samples)]
+
+    PyPlot.plt.bar(xs, samples, label=label)
 end

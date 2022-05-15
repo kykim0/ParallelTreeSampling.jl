@@ -24,7 +24,7 @@ include("distributions.jl")
 
 include("visualization.jl")
 
-export plot_estimates, plot_histogram
+export plot_estimates, plot_histogram, plot_samples
 include("plots.jl")
 
 end
