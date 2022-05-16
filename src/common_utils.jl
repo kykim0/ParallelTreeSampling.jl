@@ -47,16 +47,19 @@ function expected_cost_probs(est_α_probs, est_α_costs)
 end
 
 
-function var_sigmoid(est_var, est_α_probs, est_α_costs, nominal_probs)
-    if all(isapprox(c, 0.0) for c in est_α_costs)
-        return uniform_probs(length(est_α_costs))
+# TODO(kykim): Some ways to configure the sigmoid score fn.
+# - Based on some confidence metric, change the coefficient of the exp.
+# - Q. Do we really need to use est_α_probs?
+function var_sigmoid(est_var, est_worst, ucb_scores, nominal_probs)
+    if all(isapprox(c, 0.0) for c in ucb_scores)
+        return uniform_probs(length(ucb_scores))
     end
 
-    # TODO(kykim): Divide by the current worst cost?
-    norm_costs = (est_α_costs .- est_var) / (maximum(est_α_costs) + eps())
-    @assert !any(isnan(c) for c in norm_costs) "norm_costs NaN $(norm_costs)"
-    scores = 1 ./ (1 .+ exp.(-norm_costs))  # Sigmoid centered at est_var.
-    @assert !any(isnan(s) for s in scores) "scores NaN $(scores)"
+    norm_costs = (ucb_scores .- est_var) / (est_worst + eps())
+    # norm_costs = (ucb_scores .- est_var) / (maximum(ucb_scores) - est_var)
+    sigmoid_scores = 1 ./ (1 .+ exp.(-norm_costs))  # Sigmoid centered at est_var.
+    var_probs = softmax(sigmoid_scores)
+    scores = var_probs .* nominal_probs
     return scores ./ sum(scores)
 end
 

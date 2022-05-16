@@ -91,8 +91,10 @@ function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
 
     d = dpw.solver.depth
     est_var = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, α)
+    est_worst = tree.cdf_est.Xs[end]
+    # TODO(kykim): Add a struct to group all these args to simulate().
     cost, weight = simulate(dpw, snode, d, 0.0, 0.0, iter_n, timeout_s;
-                            est_var, α, β, γ, schedule)
+                            est_var, est_worst, α, β, γ, schedule)
 
     Base.@lock tree.costs_weights_lock begin
         push!(tree.costs, cost)
@@ -116,7 +118,7 @@ Returns the reward for one iteration of MCTS.
 function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
                   cost::Float64=0.0, weight::Float64=0.0,
                   iter_n::Integer=0, timeout_s::Float64=0.0;
-                  est_var::Float64, α::Float64, β::Float64,
+                  est_var::Float64, est_worst::Float64, α::Float64, β::Float64,
                   γ::Float64, schedule::Float64)
     tree = dpw.tree
     sol = dpw.solver
@@ -157,7 +159,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     # Sample an action based on the stats and action selection method.
     nominal_steps = exp_config.nominal_steps
     a_select = iter_n < nominal_steps ? :nominal : sol.action_selection
-    action_probs = compute_action_probs(a_select, est_var, ucb_scores,
+    action_probs = compute_action_probs(a_select, est_var, est_worst, ucb_scores,
                                         est_α_probs, est_α_costs, nominal_probs,
                                         β, γ)
     sanode, q_logprob = select_action(sanodes, action_probs)
@@ -202,7 +204,7 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     else
         out_cost, out_weight = simulate(
             dpw, spnode, d - 1, new_cost, new_weight, iter_n, timeout_s;
-            est_var, α, β, γ, schedule)
+            est_var, est_worst, α, β, γ, schedule)
         q = discount(dpw.mdp) * out_cost
     end
 
@@ -238,7 +240,7 @@ end
 Returns a sampled action and the corresponding log probability.
 """
 function select_action(sanodes, action_probs)
-    sanode_idx = sample(1:length(sanodes), Weights(action_probs))
+    sanode_idx = sample(1:length(sanodes), Weights(Float64.(action_probs)))
     sanode = sanodes[sanode_idx]
     q_logprob = log(action_probs[sanode_idx])
     @assert !isnan(q_logprob) "q_logprob NaN $(action_probs)"
@@ -249,9 +251,9 @@ end
 """
 Computes the probabilities with which to sample from the actions.
 """
-function compute_action_probs(a_selection::Symbol, est_var, ucb_scores,
-                              est_α_probs, est_α_costs, nominal_probs,
-                              β, γ)
+function compute_action_probs(a_selection::Symbol, est_var, est_worst,
+                              ucb_scores, est_α_probs, est_α_costs,
+                              nominal_probs, β, γ)
     a_selection == :nominal && return nominal_probs
     a_selection == :ucb && return ucb_probs(ucb_scores)
     a_selection == :ucb_softmax && return ucb_softmax_probs(ucb_scores)
@@ -259,6 +261,8 @@ function compute_action_probs(a_selection::Symbol, est_var, ucb_scores,
         return expected_cost_probs(est_α_probs, est_α_costs)
     a_selection == :mixture &&
         return mixture_probs(est_α_probs, est_α_costs, nominal_probs, γ)
+    a_selection == :var_sigmoid &&
+        return var_sigmoid(est_var, est_worst, ucb_scores, nominal_probs)
     a_selection == :adaptive &&
         return adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
     # TODO(kykim): Boltzmann exploration type strategy.
