@@ -1,7 +1,5 @@
 using BSON, Dates, Distributions, FileIO, Plots, Printf, StaticArrays
-
 using Crux, Flux, POMDPs, POMDPGym, POMDPSimulators, POMDPPolicies
-
 using ParallelTreeSampling
 
 include("utils.jl")
@@ -64,19 +62,19 @@ POMDPs.actionindex(mdp::RMDP, x) = findfirst(px.support .== x)
 
 fixed_s = GWPos(10,10)
 
-base_N = 1_000_000
+base_N = 10_000_000
 # Parameters for each α.
 params = Dict(
-    1e-1 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),  # Default.
-    1e-2 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
-    1e-3 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
-    1e-4 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
-    1e-5 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
+    1e-1 => (N=100_000, c=0.0, vloss=0.0, α=1e-1, β=0.1, γ=0.3),  # Default.
+    1e-2 => (N=100_000, c=0.0, vloss=0.0, α=1e-2, β=0.1, γ=0.3),
+    1e-3 => (N=100_000, c=0.0, vloss=0.0, α=1e-3, β=0.1, γ=0.3),
+    1e-4 => (N=100_000, c=0.0, vloss=0.0, α=1e-4, β=0.1, γ=0.3),
+    1e-5 => (N=100_000, c=0.0, vloss=0.0, α=1e-5, β=0.1, γ=0.3),
 )
 a_selection = :adaptive
 save_output = false
 is_baseline = false
-num_trials = 3
+num_trials = 1
 
 path = "data"
 
@@ -102,9 +100,9 @@ end
 function mcts(α::Float64, trial=0)
     nominal_distrib_fn = (mdp, s) -> px
     αp = haskey(params, α) ? params[α] : params[1e-1]
-    N, c, vloss, β, γ = αp[:N], αp[:c], αp[:vloss], αp[:β], αp[:γ]
+    N, c, vloss, β, γ, target_α = αp[:N], αp[:c], αp[:vloss], αp[:β], αp[:γ], αp[:α]
     mcts_out, planner = run_mcts(rmdp, fixed_s, nominal_distrib_fn, a_selection;
-                                 N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+                                 N=N, c=c, vloss=vloss, α=target_α, β=β, γ=γ)
     @assert length(mcts_out[1]) == N
     mcts_info = mcts_out[3]
     if save_output
@@ -127,8 +125,8 @@ for trial in 1:num_trials
     costs = is_baseline ? baseline(trial) : nothing
     weights = nothing
     for (idx, alpha) in enumerate(alpha_list)
-        Random.seed!(trial * length(alpha_list) + idx)
         if !is_baseline
+            Random.seed!(trial * length(alpha_list) + idx)
             costs, weights, search_t = mcts(alpha, trial)
             weights = exp.(weights)
             push!(alpha_times[alpha], search_t)

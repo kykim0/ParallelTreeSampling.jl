@@ -1,9 +1,5 @@
 using BSON, Dates, Distributions, FileIO, Plots, Printf, StaticArrays
-
 using Crux, Flux, POMDPs, POMDPGym, POMDPSimulators, POMDPPolicies
-
-using ParallelTreeSampling
-
 using ParallelTreeSampling
 
 include("utils.jl")
