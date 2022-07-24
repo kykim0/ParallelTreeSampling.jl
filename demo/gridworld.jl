@@ -1,10 +1,8 @@
-using BSON, Dates, Distributions, FileIO, Plots, Printf, StaticArrays
+using BSON, Dates, Distributions, FileIO, PyPlot, Printf, StaticArrays
 using Crux, Flux, POMDPs, POMDPGym, POMDPSimulators, POMDPPolicies
 using ParallelTreeSampling
 
 include("utils.jl")
-
-unicodeplots()
 
 # Basic MDP.
 tprob = 0.7
@@ -48,13 +46,13 @@ fixed_s = rand(initialstate(amdp))
 base_N = 1_000_000
 # Parameters for each α.
 params = Dict(
-    1e-1 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),  # Default.
-    1e-2 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
-    1e-3 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
-    1e-4 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
-    1e-5 => (N=100_000, c=0.0, vloss=0.0, β=0.1, γ=0.3),
+    1e-1 => (N=100_000, c=0.0, vloss=0.0),  # Default.
+    1e-2 => (N=100_000, c=0.0, vloss=0.0),
+    1e-3 => (N=100_000, c=0.0, vloss=0.0),
+    1e-4 => (N=100_000, c=0.0, vloss=0.0),
 )
 a_selection = :adaptive
+rollout_s = :nominal
 save_output = false
 is_baseline = false
 num_trials = 1
@@ -83,9 +81,10 @@ end
 
 function mcts(α::Float64, trial=0)
     αp = haskey(params, α) ? params[α] : params[1e-1]
-    N, c, vloss, β, γ = αp[:N], αp[:c], αp[:vloss], αp[:β], αp[:γ]
+    N, c, vloss = αp[:N], αp[:c], αp[:vloss]
     mcts_out, planner = run_mcts(
-        amdp, fixed_s, distribution, a_selection; N=N, c=c, vloss=vloss, α=α, β=β, γ=γ)
+        amdp, fixed_s, distribution, a_selection, rollout_s;
+        N=N, c=c, vloss=vloss, α=α)
     @assert length(mcts_out[1]) == N
     mcts_info = mcts_out[3]
     if save_output

@@ -1,10 +1,8 @@
-using BSON, Dates, Distributions, FileIO, Plots, Printf, StaticArrays
+using BSON, Dates, Distributions, FileIO, PyPlot, Printf, StaticArrays
 using Crux, Flux, POMDPs, POMDPGym, POMDPSimulators, POMDPPolicies
 using ParallelTreeSampling
 
 include("utils.jl")
-
-unicodeplots()
 
 # Create a larger GridWorldMDP.
 # Use a different set of rewards, especially with a relatively large negative
@@ -41,18 +39,15 @@ function policy_fn(s)
     return xs[rand(1:end)]
 end
 
+_p_0 = 0.90; _p_1 = (1.0 - _p_0) / 4
 px = GenericDiscreteNonParametric(
-    [GWPos(0,0),
-     GWPos(1,0), GWPos(0,1), GWPos(-1,0), GWPos(0,-1),
-     GWPos(2,0), GWPos(0,2), GWPos(-2,0), GWPos(0,-2)],
-    [0.600,
-     0.075, 0.075, 0.075, 0.075,
-     0.025, 0.025, 0.025, 0.025])
+    [GWPos(0,0), GWPos(3,0), GWPos(0,3), GWPos(-3,0), GWPos(0,-3)],
+    [_p_0, _p_1, _p_1, _p_1, _p_1])
 function cost_fn(rmdp::RMDP, s, sp)
     amdp = rmdp.amdp
     cost = get(amdp.costs, s, 0)
     reward = POMDPs.reward(amdp, s)
-    return reward < 0.0 ? -reward : amdp.cost_penalty * cost
+    return reward < 0.0 ? -reward : amdp.cost_penalty * cost * 1.0
 end
 rmdp = RMDP(amdp=mdp, π=FunctionPolicy(policy_fn), cost_fn=cost_fn, disturbance_type=:noise)
 
@@ -62,24 +57,28 @@ POMDPs.actionindex(mdp::RMDP, x) = findfirst(px.support .== x)
 
 fixed_s = GWPos(10,10)
 
-base_N = 10_000_000
+base_N = 100_000
 # Parameters for each α.
 params = Dict(
-    1e-1 => (N=100_000, c=0.0, vloss=0.0, α=1e-1, β=0.1, γ=0.3),  # Default.
-    1e-2 => (N=100_000, c=0.0, vloss=0.0, α=1e-2, β=0.1, γ=0.3),
-    1e-3 => (N=100_000, c=0.0, vloss=0.0, α=1e-3, β=0.1, γ=0.3),
-    1e-4 => (N=100_000, c=0.0, vloss=0.0, α=1e-4, β=0.1, γ=0.3),
-    1e-5 => (N=100_000, c=0.0, vloss=0.0, α=1e-5, β=0.1, γ=0.3),
+    1e-1 => (N=100_000, c=3.0, vloss=0.0, α=1e-1, min_s=5.0,
+             mix_w_fn=linear_decay_schedule(1.0, 0.95, 50_000)),
+    5e-2 => (N=100_000, c=3.0, vloss=0.0, α=5e-2, min_s=5.0,
+             mix_w_fn=linear_decay_schedule(1.0, 0.95, 50_000)),
+    1e-2 => (N=100_000, c=3.0, vloss=0.0, α=1e-2, min_s=5.0,
+             mix_w_fn=linear_decay_schedule(1.0, 0.95, 50_000)),
+    1e-3 => (N=10_000, c=5.0, vloss=0.0, α=1e-3, min_s=5.0,
+             mix_w_fn=(n) -> 0.5),
 )
-a_selection = :adaptive
+a_selection = :var_sigmoid
+rollout_s = :nominal
 save_output = false
 is_baseline = false
-num_trials = 1
+plot_est = true
+num_trials = 3
 
 path = "data"
 
-# alpha_list = [1e-2, 1e-3, 1e-4, 1e-5]
-alpha_list = [1e-3, 1e-4]
+alpha_list = [1e-2]
 date_str = Dates.format(Dates.now(), "yyyy-mm-dd")
 time_str = Dates.format(Dates.now(), "HHMM")
 
@@ -100,9 +99,10 @@ end
 function mcts(α::Float64, trial=0)
     nominal_distrib_fn = (mdp, s) -> px
     αp = haskey(params, α) ? params[α] : params[1e-1]
-    N, c, vloss, β, γ, target_α = αp[:N], αp[:c], αp[:vloss], αp[:β], αp[:γ], αp[:α]
-    mcts_out, planner = run_mcts(rmdp, fixed_s, nominal_distrib_fn, a_selection;
-                                 N=N, c=c, vloss=vloss, α=target_α, β=β, γ=γ)
+    N, c, vloss, target_α, mix_w_fn, min_s = αp[:N], αp[:c], αp[:vloss], αp[:α], αp[:mix_w_fn], αp[:min_s]
+    mcts_out, planner = run_mcts(
+        rmdp, fixed_s, nominal_distrib_fn, a_selection, rollout_s, mix_w_fn, min_s;
+        N=N, c=c, vloss=vloss, α=target_α)
     @assert length(mcts_out[1]) == N
     mcts_info = mcts_out[3]
     if save_output
@@ -118,12 +118,13 @@ function mcts(α::Float64, trial=0)
 end
 
 
+alpha_raw = Dict(alpha => [] for alpha in alpha_list)
 alpha_metrics = Dict(alpha => [] for alpha in alpha_list)
 alpha_times = Dict(alpha => [] for alpha in alpha_list)
 for trial in 1:num_trials
-    Random.seed!(trial)
+    Random.seed!(trial * 2)
     costs = is_baseline ? baseline(trial) : nothing
-    weights = nothing
+    local weights = nothing
     for (idx, alpha) in enumerate(alpha_list)
         if !is_baseline
             Random.seed!(trial * length(alpha_list) + idx)
@@ -131,6 +132,8 @@ for trial in 1:num_trials
             weights = exp.(weights)
             push!(alpha_times[alpha], search_t)
         end
+        raw_data = isnothing(weights) ? costs : (costs, weights)
+        push!(alpha_raw[alpha], raw_data)
         m = eval_metrics(costs; weights=weights, alpha=alpha)
         m_tuple = (mean=m.mean, var=m.var, cvar=m.cvar, worst=m.worst)
         push!(alpha_metrics[alpha], m_tuple)
@@ -158,4 +161,22 @@ for alpha in alpha_list
         print("\ttime: $(@sprintf("%.3f", t_mean))±$(@sprintf("%.3f", t_max-t_mean))")
     end
     println()
+end
+
+if plot_est
+    PyPlot.plt.figure(figsize=(9.0, 6.0))
+    delta_n = 100; log_scale = true
+    for alpha in alpha_list
+        alpha_str = @sprintf("%.1e", alpha)
+        n_samples = alpha_raw[alpha]
+
+        v_ret = plot_estimates(n_samples, estimate_fn(:var, alpha), delta_n,
+                               "VaR-$(alpha_str)", log_scale)
+        cv_ret = plot_estimates(n_samples, estimate_fn(:cvar, alpha), delta_n,
+                                "CVaR-$(alpha_str)", log_scale)
+
+        v_x, v_min_y, v_mid_y, v_max_y = v_ret
+        cv_x, cv_min_y, cv_mid_y, cv_max_y = cv_ret
+    end
+    xlabel("no. samples"); ylabel("estimates"); legend();
 end

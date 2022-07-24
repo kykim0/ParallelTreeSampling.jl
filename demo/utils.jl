@@ -32,8 +32,9 @@ end
 
 
 # Runs MCTS-based sampling.
-function run_mcts(mdp::MDP, s, nominal_distrib_fn, a_selection;
-                  N=1000, c=0.0, vloss=0.0, α=0.1, β=1.0, γ=0.0,
+function run_mcts(mdp::MDP, s, nominal_distrib_fn, a_selection, rollout_s,
+                  mix_w_fn=(n) -> 0.5, min_s=5.0;
+                  N=1000, c=0.0, vloss=0.0, α=0.1,
                   nominal_steps=0, show_progress=false)
     experiment_config = ExperimentConfig(nominal_steps=nominal_steps)
     solver = PISSolver(; depth=100,
@@ -43,12 +44,13 @@ function run_mcts(mdp::MDP, s, nominal_distrib_fn, a_selection;
                        k_state=Inf,             # Needed for discrete cases (to always transition).
                        virtual_loss=vloss,
                        nominal_distrib_fn=nominal_distrib_fn,
+                       rollout_strategy=rollout_s,
                        action_selection=a_selection,
                        experiment_config=experiment_config,
                        show_progress=show_progress)
     planner = solve(solver, mdp)
     a, info = action_info(planner, s; tree_in_info=true,
-                          α=α, β=β, γ=γ, schedule=0.0)
+                          α=α, mix_w_fn=mix_w_fn, min_s=min_s)
     tree = info[:tree]
     output = (tree.costs, tree.weights, info)
     return output, planner
@@ -66,4 +68,16 @@ function eval_metrics(costs; weights=nothing, alpha=1e-4)
 
     metrics = IWRiskMetrics(costs, weights, alpha);
     return metrics
+end
+
+
+# Returns a lambda for computing metrics used for plotting.
+#
+# Valid metric types include :mean, :var, :cvar, :worst.
+function estimate_fn(metric_type, alpha)
+    fn = function(samples, weights=nothing)
+        metrics = eval_metrics(samples; weights=weights, alpha=alpha)
+        return getproperty(metrics, metric_type)
+    end
+    return fn
 end
