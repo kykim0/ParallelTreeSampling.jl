@@ -25,7 +25,8 @@ function plot_estimates(n_samples::Vector, estimate_fn::Function,
     while x_i < total_n
         push!(xl, x_i)
         if log_scale
-            x_i = length(xl) % 2 == 1 ? 5 * x_i : 10 * x_i
+            if 3 * x_i < total_n; push!(xl, 3 * x_i); end
+            x_i *= 10
         else
             x_i += delta_n
         end
@@ -43,10 +44,10 @@ function plot_estimates(n_samples::Vector, estimate_fn::Function,
     #  plot(x_mc, mid_y_mc, ribbon=(max_y_mc - mid_y_mc), fillalpha=0.15,
     #       label="MC", lw=2, xlabel="no. of samples", ylabel="estimates")
     #  plot(x_is, mid_y_is, ribbon=(max_y_is - mid_y_is), fillalpha=0.15, label="IS", lw=2)
-    p = PyPlot.plt.plot(xl, mid_y, label=label, lw=0.5)
-    PyPlot.plt.xscale("log")
+    PyPlot.plt.plot(xl, mid_y, label=label, lw=0.5)
+    log_scale && PyPlot.plt.xscale("log")
     PyPlot.plt.fill_between(xl, min_y, max_y, alpha=0.15)
-    return p
+    return xl, min_y, mid_y, max_y
 end
 
 

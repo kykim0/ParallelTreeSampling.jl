@@ -8,16 +8,16 @@ include("utils.jl")
 
 
 # Parameters to be set for plotting.
-mc_base_dir = "data/2022-05-15"; is_base_dir = "data/2022-05-15"
-# mc_data = [joinpath(mc_base_dir, "gwl_mc_1746_10000000_$(trial).jld2") for trial in 1:3]
-mc_data = []
-is_data = [joinpath(is_base_dir, "gwl_is_var_sigmoid_1e-3_1742_100000_$(trial).jld2") for trial in 1:3]
+mc_base_dir = "data/save"; is_base_dir = "data/save"
+mc_data = [joinpath(mc_base_dir, "gwl_mc_100000_$(trial).jld2") for trial in 1:3]
+# mc_data = []
+is_data = [joinpath(is_base_dir, "gwl_is_p99_100000_$(trial).jld2") for trial in 1:3]
 # is_data = []
-is_data2 = [joinpath(is_base_dir, "gwl_is_adaptive_2036_100000_$(trial).jld2") for trial in 1:3]
-# is_data2 = []
-max_num_mc = 1_000_000; max_num_is = -1; max_num_is2 = -1
+# is_data2 = [joinpath(is_base_dir, "gwl_is_var_sigmoid_1353_100000_$(trial).jld2") for trial in 1:3]
+is_data2 = []
+max_num_mc = 100_000; max_num_is = -1; max_num_is2 = -1
 delta_n_mc = 100; delta_n_is = 100; delta_n_is2 = 100
-plot_est = true; plot_hist = true; plot_ws = false; log_scale = true
+plot_est = true; plot_hist = false; plot_ws = false; log_scale = true; plot_tex = true
 output_dir = joinpath(homedir(), "Desktop")
 
 # Constants to be updated as needed.
@@ -38,42 +38,38 @@ n_is2_samples = [load_jld2(is_datum)[1:(max_num_is < 0 ? end : max_num_is)]
                  for is_datum in is_data2]
 
 
-# Returns a lambda for computing metrics used for plotting.
-#
-# Valid metric types include :mean, :var, :cvar, :worst.
-function estimate_fn(metric_type, alpha)
-    fn = function(samples, weights=nothing)
-        metrics = eval_metrics(samples; weights=weights, alpha=alpha)
-        return getproperty(metrics, metric_type)
-    end
-    return fn
+# Configure relevant params if for tex.
+if plot_tex
+    PyPlot.matplotlib[:rc]("font", family="serif")
+    PyPlot.matplotlib[:rc]("text", usetex=true)
+    PyPlot.matplotlib[:rc]("pgf", rcfonts=false)
 end
 
 
 # Plot convergence graphs.
-alphas = [1e-3]
+alphas = [1e-2]
 if plot_est
     PyPlot.plt.figure(figsize=(9.0, 6.0))
     for alpha in alphas
         alpha_str = @sprintf("%.1e", alpha)
 
-        plot_estimates(n_mc_samples, estimate_fn(:var, alpha),
-                       delta_n_mc, "MC-VaR-$(alpha_str)", log_scale)
-        plot_estimates(n_mc_samples, estimate_fn(:cvar, alpha),
-                       delta_n_mc, "MC-CVaR-$(alpha_str)", log_scale)
+        mc_var_ret = plot_estimates(n_mc_samples, estimate_fn(:var, alpha),
+                                    delta_n_mc, "MC-VaR-$(alpha_str)", log_scale)
+        is_var_ret = plot_estimates(n_is_samples, estimate_fn(:var, alpha),
+                                    delta_n_is, "IS-VaR-$(alpha_str)", log_scale)
+        is2_var_ret = plot_estimates(n_is2_samples, estimate_fn(:var, alpha),
+                                     delta_n_is, "IS2-VaR-$(alpha_str)", log_scale)
 
-        plot_estimates(n_is_samples, estimate_fn(:var, alpha),
-                       delta_n_is, "IS-VaR-$(alpha_str)", log_scale)
-        plot_estimates(n_is_samples, estimate_fn(:cvar, alpha),
-                       delta_n_is, "IS-CVaR-$(alpha_str)", log_scale)
-
-        plot_estimates(n_is2_samples, estimate_fn(:var, alpha),
-                       delta_n_is, "IS2-VaR-$(alpha_str)", log_scale)
-        plot_estimates(n_is2_samples, estimate_fn(:cvar, alpha),
-                       delta_n_is, "IS2-CVaR-$(alpha_str)", log_scale)
+        mc_cvar_ret = plot_estimates(n_mc_samples, estimate_fn(:cvar, alpha),
+                                     delta_n_mc, "MC-CVaR-$(alpha_str)", log_scale)
+        is_cvar_ret = plot_estimates(n_is_samples, estimate_fn(:cvar, alpha),
+                                     delta_n_is, "IS-CVaR-$(alpha_str)", log_scale)
+        is2_cvar_ret = plot_estimates(n_is2_samples, estimate_fn(:cvar, alpha),
+                                      delta_n_is, "IS2-CVaR-$(alpha_str)", log_scale)
     end
-    xlabel("no. samples"); ylabel("estimates"); legend();
+    xlabel("Samples"); ylabel("Estimates"); legend();
     if !isempty(output_dir)
+        PyPlot.plt.tight_layout()
         PyPlot.plt.savefig(joinpath(output_dir, "estimates.png"), dpi=500)
     end
 end
@@ -94,8 +90,9 @@ if plot_hist
     plot_histogram(samples, bins=nbins, label="IS2-uw")
     plot_histogram(samples, weights, bins=nbins, label="IS2-w")
 
-    ylim(bottom=0.0); xlabel("costs"); ylabel("density"); legend();
+    ylim(bottom=0.0); xlabel("Costs"); ylabel("Density"); legend();
     if !isempty(output_dir)
+        PyPlot.plt.tight_layout()
         PyPlot.plt.savefig(joinpath(output_dir, "histogram.png"), dpi=500)
     end
 end
@@ -113,6 +110,7 @@ if plot_ws
 
     xlabel("i"); ylabel("weights"); legend();
     if !isempty(output_dir)
+        PyPlot.plt.tight_layout()
         PyPlot.plt.savefig(joinpath(output_dir, "sample-weights.png"), dpi=500)
     end
 end
