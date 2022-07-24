@@ -30,9 +30,9 @@ Fields:
     nominal_distrib_fn::Function
         A function that takes in an MDP and a state as input and returns the
         nominal distribution over actions. Used for computing the weights.
-    cost_reduction::Symbol
+    rollout_strategy::Symbol
     action_selection::Symbol
-        The type of strategy to use for reducing costs, selecting actions, etc.
+        The type of strategy to use for rollout, selecting actions, etc.
     experiment_config::Any
         Various experimental settings. After finishing experimenting should be
         either removed or promoted to be separat ctor args. See the struct for
@@ -92,7 +92,7 @@ mutable struct PISSolver
     alpha_state::Float64
     virtual_loss::Float64
     nominal_distrib_fn::Function
-    cost_reduction::Symbol
+    rollout_strategy::Symbol
     action_selection::Symbol
     experiment_config::Any
     keep_tree::Bool
@@ -131,7 +131,7 @@ function PISSolver(;depth::Int=10,
                    alpha_state::Float64=0.5,
                    virtual_loss::Float64=0.0,
                    nominal_distrib_fn=(mdp, s)->Normal(0, 1),
-                   cost_reduction::Symbol=:sum,
+                   rollout_strategy::Symbol=:uniform,
                    action_selection::Symbol=:adaptive,
                    experiment_config::Any=ExperimentConfig(),
                    keep_tree::Bool=false,
@@ -147,7 +147,7 @@ function PISSolver(;depth::Int=10,
                    timer=()->1e-9*time_ns())
     PISSolver(depth, exploration_constant, n_iterations, max_time, k_action,
               alpha_action, k_state, alpha_state, virtual_loss,
-              nominal_distrib_fn, cost_reduction, action_selection,
+              nominal_distrib_fn, rollout_strategy, action_selection,
               experiment_config, keep_tree, enable_action_pw, enable_state_pw,
               rng, init_Q, init_N, next_action, default_action, reset_callback,
               show_progress, timer)
