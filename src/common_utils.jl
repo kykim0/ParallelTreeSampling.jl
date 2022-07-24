@@ -1,6 +1,6 @@
 # Updates the accumulated cost.
 function update_cost(acc_cost::Float64, new_cost::Union{Int64,Float64},
-                     reduction_type::Symbol)
+                     reduction_type::Symbol=:sum)
     if reduction_type == :sum
         return acc_cost + new_cost
     elseif reduction_type == :max
@@ -10,85 +10,23 @@ function update_cost(acc_cost::Float64, new_cost::Union{Int64,Float64},
 end
 
 
-# Numerically stable softmax.
-function softmax(x, θ::AbstractFloat=1.0, dim::Integer=1)
-    x_exps = exp.((x .- maximum(x)) * θ)
-    return x_exps ./ sum(x_exps, dims=dim)
-end
-
-
-# Uniform probability vector of a given length.
-uniform_probs(n::Integer) = fill(1 / n, n)
-
-# Various strategies for computing action selection probabilities.
-# TODO(kykim): Consider putting these out into a separate jl.
-function ucb_probs(ucb_scores)
-    if all(isapprox(e, 0.0) for e in ucb_scores)
-        return uniform_probs(length(ucb_scores))
+# Returns a linear decay schedule function.
+function linear_decay_schedule(start_w::Float64, end_w::Float64, end_n)
+    fn = function(curr_n)
+        curr_n >= end_n && return end_w
+        slope = (end_w - start_w) / (end_n - 1)
+        return start_w + slope * (curr_n - 1)
     end
-    scores = ucb_scores .- minimum(ucb_scores)
-    scores /= sum(scores)
-    return scores
+    return fn
 end
 
 
-function ucb_softmax_probs(ucb_scores)
-    return softmax(ucb_scores, 1.0)
-end
-
-
-function expected_cost_probs(est_α_probs, est_α_costs)
-    if all(isapprox(c, 0.0) for c in est_α_costs)
-        return uniform_probs(length(est_α_costs))
+# Returns an exp decay schedule function.
+function exp_decay_schedule(start_w::Float64, end_w::Float64, end_n)
+    fn = function(curr_n)
+        curr_n >= end_n && return end_w
+        ratio = exp(log(end_w / start_w) / (end_n - 1))
+        return start_w * ratio^(curr_n - 1)
     end
-    scores = est_α_probs .* est_α_costs
-    scores /= sum(scores)
-    return scores
-end
-
-
-# TODO(kykim): Some ways to configure the sigmoid score fn.
-# - Based on some confidence metric, change the coefficient of the exp.
-# - Q. Do we really need to use est_α_probs?
-function var_sigmoid(est_var, est_worst, ucb_scores, nominal_probs)
-    if all(isapprox(c, 0.0) for c in ucb_scores)
-        return uniform_probs(length(ucb_scores))
-    end
-
-    norm_costs = (ucb_scores .- est_var) / (est_worst + eps())
-    # norm_costs = (ucb_scores .- est_var) / (maximum(ucb_scores) - est_var)
-    sigmoid_scores = 1 ./ (1 .+ exp.(-norm_costs))  # Sigmoid centered at est_var.
-    var_probs = softmax(sigmoid_scores)
-    scores = var_probs .* nominal_probs
-    return scores ./ sum(scores)
-end
-
-
-function mixture_probs(est_α_probs, est_α_costs, nominal_probs, γ)
-    var_distrib = nominal_probs .* est_α_probs .+ eps()
-    cvar_distrib = nominal_probs .* est_α_probs .* est_α_costs .+ eps()
-
-    var_distrib /= sum(var_distrib)
-    cvar_distrib /= sum(cvar_distrib)
-
-    # Mixture weighting.
-    mixture_distrib = γ * var_distrib .+ (1 - γ) * cvar_distrib
-    mixture_distrib /= sum(mixture_distrib)
-    return mixture_distrib
-end
-
-
-function adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
-    max_α_cost = maximum(est_α_costs)
-    max_α_prob = maximum(est_α_probs)
-    max_nominal_prob = maximum(nominal_probs)
-
-    cvar_strategy = est_α_costs .* nominal_probs .+ (max_α_cost / 20) .+ eps()
-    cdf_strategy = est_α_probs .* nominal_probs .+ (max_α_prob * max_nominal_prob / 20) .+ eps()
-    cvar_strategy /= sum(cvar_strategy)
-    cdf_strategy /= sum(cdf_strategy)
-
-    # Mixture weighting.
-    a_probs = β * nominal_probs .+ γ * cdf_strategy .+ (1 - β - γ) * cvar_strategy
-    return a_probs
+    return fn
 end
