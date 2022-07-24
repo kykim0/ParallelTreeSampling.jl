@@ -12,6 +12,8 @@ using PyPlot
 #   log_scale: true to set x on the log scale.
 function plot_estimates(n_samples::Vector, estimate_fn::Function,
                         delta_n::Integer, label::String, log_scale::Bool=false)
+    if isempty(n_samples); return nothing; end
+
     # Compute the x range.
     if isa(first(n_samples), Tuple)
         total_n = length(first(n_samples)[1])
@@ -22,7 +24,12 @@ function plot_estimates(n_samples::Vector, estimate_fn::Function,
     x_i = delta_n
     while x_i < total_n
         push!(xl, x_i)
-        x_i = log_scale ? 10 * x_i : x_i + delta_n
+        if log_scale
+            if 3 * x_i < total_n; push!(xl, 3 * x_i); end
+            x_i *= 10
+        else
+            x_i += delta_n
+        end
     end
     if (last(xl) != total_n); push!(xl, total_n); end
 
@@ -37,10 +44,10 @@ function plot_estimates(n_samples::Vector, estimate_fn::Function,
     #  plot(x_mc, mid_y_mc, ribbon=(max_y_mc - mid_y_mc), fillalpha=0.15,
     #       label="MC", lw=2, xlabel="no. of samples", ylabel="estimates")
     #  plot(x_is, mid_y_is, ribbon=(max_y_is - mid_y_is), fillalpha=0.15, label="IS", lw=2)
-    p = PyPlot.plt.plot(xl, mid_y, label=label, lw=0.5)
-    PyPlot.plt.xscale("log")
+    PyPlot.plt.plot(xl, mid_y, label=label, lw=0.5)
+    log_scale && PyPlot.plt.xscale("log")
     PyPlot.plt.fill_between(xl, min_y, max_y, alpha=0.15)
-    return p
+    return xl, min_y, mid_y, max_y
 end
 
 
@@ -48,6 +55,21 @@ end
 function plot_histogram(samples::Vector, weights::Union{Vector,Nothing}=nothing;
                         bins::Integer=10, density::Bool=true,
                         label::String=nothing)
+    if isempty(samples); return; end
+
     PyPlot.plt.hist(samples, bins, weights=weights, density=density,
                     label=label, alpha=0.3)
+end
+
+
+# Plots bar graphs of a series of samples.
+function plot_samples(samples::Vector; n::Integer, label::String=nothing)
+    if isempty(samples); return; end
+
+    # Create a subset of samples of size roughly n.
+    delta_n = Int(floor(length(samples) / n))
+    samples = samples[1:delta_n:end]
+    xs = [x for x in 1:length(samples)]
+
+    PyPlot.plt.bar(xs, samples, label=label)
 end
