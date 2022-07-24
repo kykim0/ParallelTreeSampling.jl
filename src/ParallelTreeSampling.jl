@@ -11,6 +11,9 @@ using StatsBase
 
 include("common_utils.jl")
 
+export linear_decay_schedule, exp_decay_schedule
+include("weights.jl")
+
 include("tree.jl")
 
 export PISSolver, PISPlanner, ExperimentConfig
