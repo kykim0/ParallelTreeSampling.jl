@@ -37,11 +37,9 @@ function POMDPModelTools.action_info(p::PISPlanner, s; tree_in_info=false, kwarg
     n_iterations = p.solver.n_iterations
     p.solver.show_progress ? progress = Progress(n_iterations) : nothing
 
-    # TODO(kykim): Implement DM weighting.
     sim_channel = Channel{Task}(min(10_000, n_iterations)) do channel
         for n in 1:n_iterations
-            put!(channel, Threads.@spawn simulate_sample(
-                p, snode, n, timeout_s; kwargs...))
+            put!(channel, Threads.@spawn simulate_sample(p, snode, n, timeout_s; kwargs...))
         end
     end
 
@@ -85,16 +83,24 @@ function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
 
     kwargs = Dict(kwargs)
     α = get(kwargs, :α, 0.1)
-    β = get(kwargs, :β, 0.0)
-    γ = get(kwargs, :γ, 1.0)
-    schedule = get(kwargs, :schedule, 0.0)
+    mix_w_fn = get(kwargs, :mix_w_fn, (i) -> 0.5)
+    min_s = get(kwargs, :min_s, 5.0)
 
     d = dpw.solver.depth
-    est_var = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, α)
-    est_worst = tree.cdf_est.Xs[end]
+    est_var = 1.0; emp_var = 1.0; est_worst = 1.0
+    Base.@lock tree.costs_weights_lock begin
+        est_var = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, α)
+        emp_var = est_var
+        est_worst = tree.cdf_est.Xs[end]
+        haskey(tree._emp_vars, α) ? push!(tree._emp_vars[α], est_var) : tree._emp_vars[α] = [est_var]
+        if length(tree._emp_vars[α]) > 1
+            emp_var = StatsBase.var(
+                tree._emp_vars[α], FrequencyWeights(ones(length(tree._emp_vars[α]))); corrected=true)
+        end
+    end
     # TODO(kykim): Add a struct to group all these args to simulate().
     cost, weight = simulate(dpw, snode, d, 0.0, 0.0, iter_n, timeout_s;
-                            est_var, est_worst, α, β, γ, schedule)
+                            est_var, est_worst, α, emp_var, mix_w_fn, min_s)
 
     Base.@lock tree.costs_weights_lock begin
         push!(tree.costs, cost)
@@ -104,7 +110,7 @@ function simulate_sample(dpw::PISPlanner, snode::PISStateNode,
         n_samples = length(tree.costs)
         for i in tree.cdf_est.last_i+1:n_samples
             # Depending on how fast/slow this is, making copies of costs and weights first then
-            # immediately releasing the lock can be better. But, of course, as we collect more
+            # immediately releasing the lock could be better. But, of course, as we collect more
             # samples, copying can increasingly be slow.
             ImportanceWeightedRiskMetrics.update!(tree.cdf_est, tree.costs[i], exp(tree.weights[i]))
         end
@@ -118,8 +124,8 @@ Returns the reward for one iteration of MCTS.
 function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
                   cost::Float64=0.0, weight::Float64=0.0,
                   iter_n::Integer=0, timeout_s::Float64=0.0;
-                  est_var::Float64, est_worst::Float64, α::Float64, β::Float64,
-                  γ::Float64, schedule::Float64)
+                  est_var::Float64, est_worst::Float64, α::Float64,
+                  emp_var::Float64, mix_w_fn::Function, min_s::Float64)
     tree = dpw.tree
     sol = dpw.solver
     s = snode.s_label
@@ -131,8 +137,8 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
         return cost, weight
     elseif d == 0
         out_cost, out_weight = estimate_value(dpw.mdp, s, d, cost, weight,
-                                              sol.cost_reduction,
-                                              action_distrib_fn)
+                                              action_distrib_fn,
+                                              sol.rollout_strategy)
         return out_cost, out_weight
     end
 
@@ -154,14 +160,14 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
 
     # Compute various action statistics.
     sanodes, ucb_scores, est_α_probs, est_α_costs, nominal_probs = sanode_stats(
-        dpw, snode, action_distrib, est_var, α, schedule)
+        dpw, snode, action_distrib, est_var)
 
     # Sample an action based on the stats and action selection method.
     nominal_steps = exp_config.nominal_steps
     a_select = iter_n < nominal_steps ? :nominal : sol.action_selection
     action_probs = compute_action_probs(a_select, est_var, est_worst, ucb_scores,
                                         est_α_probs, est_α_costs, nominal_probs,
-                                        β, γ)
+                                        emp_var, mix_w_fn(iter_n), min_s)
     sanode, q_logprob = select_action(sanodes, action_probs)
     Base.@lock snode.s_lock begin; push!(snode.a_selected, sanode.a_label); end
 
@@ -195,16 +201,16 @@ function simulate(dpw::PISPlanner, snode::PISStateNode, d::Int,
     end
 
     new_weight = weight + w_node
-    new_cost = update_cost(cost, r, sol.cost_reduction)
+    new_cost = update_cost(cost, r, :sum)
     if new_node
         out_cost, out_weight = estimate_value(dpw.mdp, sp, d - 1, new_cost,
-                                              new_weight, sol.cost_reduction,
-                                              action_distrib_fn)
+                                              new_weight, action_distrib_fn,
+                                              sol.rollout_strategy)
         q = discount(dpw.mdp) * out_cost
     else
         out_cost, out_weight = simulate(
             dpw, spnode, d - 1, new_cost, new_weight, iter_n, timeout_s;
-            est_var, est_worst, α, β, γ, schedule)
+            est_var, est_worst, α, emp_var, mix_w_fn, min_s)
         q = discount(dpw.mdp) * out_cost
     end
 
@@ -253,18 +259,17 @@ Computes the probabilities with which to sample from the actions.
 """
 function compute_action_probs(a_selection::Symbol, est_var, est_worst,
                               ucb_scores, est_α_probs, est_α_costs,
-                              nominal_probs, β, γ)
+                              nominal_probs, emp_var, mix_w, min_s)
     a_selection == :nominal && return nominal_probs
-    a_selection == :ucb && return ucb_probs(ucb_scores)
+    a_selection == :ucb && return ucb_probs(ucb_scores, nominal_probs)
     a_selection == :ucb_softmax && return ucb_softmax_probs(ucb_scores)
-    a_selection == :expected_cost &&
-        return expected_cost_probs(est_α_probs, est_α_costs)
     a_selection == :mixture &&
-        return mixture_probs(est_α_probs, est_α_costs, nominal_probs, γ)
+        return mixture_probs(est_α_probs, est_α_costs, nominal_probs)
     a_selection == :var_sigmoid &&
-        return var_sigmoid(est_var, est_worst, ucb_scores, nominal_probs)
+        return var_sigmoid(est_var, est_worst, ucb_scores, nominal_probs,
+                           emp_var, mix_w, min_s)
     a_selection == :adaptive &&
-        return adaptive_probs(est_α_probs, est_α_costs, nominal_probs, β, γ)
+        return adaptive_probs(est_α_probs, est_α_costs, nominal_probs)
     # TODO(kykim): Boltzmann exploration type strategy.
     throw("Unsupported action selection strategy: $(a_selection)")
 end
@@ -281,7 +286,7 @@ end
 
 
 function sanode_stats(dpw::PISPlanner, snode::PISStateNode, action_distrib,
-                      est_var::Float64, α::Float64, schedule::Float64)
+                      est_var::Float64)
     tree = dpw.tree
     sol = dpw.solver
     c = sol.exploration_constant
@@ -293,9 +298,6 @@ function sanode_stats(dpw::PISPlanner, snode::PISStateNode, action_distrib,
     est_α_costs = []
     est_α_probs = []
     nominal_probs = []
-
-    # α schedule for potentially smoother convergence.
-    a_α = action_α(α, 1.0, 0.0)
 
     # Instead of creating a copy, we can presumably just compute the no. of children and read only
     # that many elements of children(snode). But, this is also technically not safe as the vector
@@ -328,9 +330,6 @@ function sanode_stats(dpw::PISPlanner, snode::PISStateNode, action_distrib,
         push!(ucb_scores, UCB)
         push!(sanodes, sanode)
 
-        # TODO(kykim): Should the scheduling be really at the action level i.e.
-        #   a_α = action_α(α, a_n, schedule)
-        #   est_var = ImportanceWeightedRiskMetrics.quantile(tree.cdf_est, a_α)
         c_tail = ImportanceWeightedRiskMetrics.tail_cost(sanode.c_cdf_est, est_var)
         c_cdf = ImportanceWeightedRiskMetrics.cdf(sanode.c_cdf_est, est_var)
         push!(est_α_costs, c_tail)
